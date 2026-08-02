@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Molt: An Agentic-First RL Framework</title>
+  <meta name="description" content="Molt is an agentic-first, PyTorch-native RL framework: Ray, vLLM, and NVIDIA AutoModel, the smallest stack for 1T-class fully-async, multimodal, multi-turn agentic RL.">
+  <meta name="citation_title" content="Molt: A Scalable PyTorch-Native Training Framework for Agentic Reinforcement Learning">
+  <meta name="citation_author" content="Jian Hu">
+  <meta name="citation_publication_date" content="2026">
+  <meta name="citation_pdf_url" content="https://arxiv.org/pdf/2607.21653">
+  <meta property="og:title" content="Molt: An Agentic-First RL Framework"/>
+  <meta property="og:description" content="Ray, vLLM, and NVIDIA AutoModel: the smallest PyTorch-native stack for 1T-class fully-async, multimodal, multi-turn agentic RL."/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="https://yifanzhang-pro.github.io/labs-molt/"/>
+  <link rel="canonical" href="https://yifanzhang-pro.github.io/labs-molt/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230A0A0A'/%3E%3Ctext x='50' y='55' font-family='Arial,sans-serif' font-size='44' font-weight='700' fill='white' text-anchor='middle' dominant-baseline='central'%3EM%3C/text%3E%3C/svg%3E" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <style>
+    /* ===== Monochrome system (OpenAI x SpaceX) — skins existing markup ===== */
+    :root{
+      --bg:#FFFFFF; --bg-subtle:#F7F7F5; --bg-subtle-2:#EFEFEC;
+      --ink:#0A0A0A; --ink-2:#3A3A3A; --ink-3:#6B6B6B; --line:#E7E7E3;
+      --d-bg:#0A0A0A; --d-ink:#FFFFFF; --d-ink-2:rgba(255,255,255,.62);
+      --d-ink-3:rgba(255,255,255,.42); --d-line:rgba(255,255,255,.14);
+      --nav-h:68px; --maxw:1120px; --readw:1120px; --ease:cubic-bezier(.22,.61,.36,1);
+      --primary-color:#0A0A0A; --accent-color:#0A0A0A; --content-bg:#F7F7F5;
+      --border-color:#E7E7E3; --text-main:#3A3A3A; --text-on-primary:#FFFFFF;
+      --link-color:#0A0A0A; --link-hover-color:#0A0A0A; --primary-color-rgb:10,10,10; --link-color-rgb:10,10,10;
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+    body{margin:0;font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      background:var(--bg);color:var(--ink);line-height:1.6;overflow-x:hidden;display:flex;flex-direction:column;min-height:100vh;
+      text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+    a{color:inherit;text-decoration:none} img{max-width:100%;display:block} ::selection{background:var(--ink);color:var(--bg)}
+    body.nav-open{overflow:hidden}
+    .container{width:100%;max-width:var(--maxw);margin:0 auto;padding-inline:clamp(1.25rem,5vw,3rem)}
+    .section.content-section .container{max-width:var(--readw)}
+    .has-text-centered{text-align:center!important} .has-text-justified{text-align:justify}
+    .has-text-grey{color:var(--ink-3)!important} .is-italic{font-style:italic}
+    .has-text-weight-bold{font-weight:700} .has-text-weight-medium{font-weight:500}
+    .is-size-3{font-size:1.5rem} .is-size-4{font-size:1.3rem} .is-size-5{font-size:1.15rem} .is-size-6{font-size:1rem} .is-size-7{font-size:.82rem}
+    .mb-6{margin-bottom:1.5rem!important} .mt-3{margin-top:.75rem!important} .mt-5{margin-top:1.25rem!important} .mt-6{margin-top:2rem!important}
+    .my-4{margin-top:1rem!important;margin-bottom:1rem!important} .my-5{margin-top:1.5rem!important;margin-bottom:1.5rem!important}
+    .tight{margin-top:.5rem!important;margin-bottom:.75rem!important}
+    .icon{display:inline-flex;align-items:center;justify-content:center}
+    hr{border:0;border-top:1px solid var(--line);margin:1rem 0}
+
+    /* Nav */
+    .navbar{position:fixed;inset:0 0 auto 0;z-index:200;height:var(--nav-h);display:flex;align-items:center;background:transparent;
+      border-bottom:1px solid transparent;transition:background .4s var(--ease),border-color .4s var(--ease),backdrop-filter .4s var(--ease)}
+    .navbar>.container{display:flex;align-items:center;justify-content:space-between}
+    .navbar-brand{display:flex;align-items:center;position:relative;z-index:160;min-height:auto}
+    .navbar-brand .navbar-item{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:1.05rem;letter-spacing:.14em;
+      text-transform:uppercase;color:var(--d-ink);padding:0;background:transparent!important;transition:color .4s var(--ease)}
+    .navbar-menu{display:flex;box-shadow:none;background:transparent;padding:0} .navbar-end{display:flex;align-items:center;gap:1.8rem;margin-left:auto}
+    .navbar-menu .navbar-item{position:relative;font-size:.78rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--d-ink-2);padding:.25rem 0;background:transparent!important;transition:color .25s var(--ease)}
+    .navbar-menu .navbar-item::after{content:"";position:absolute;left:0;right:0;bottom:-4px;height:1px;background:currentColor;
+      transform:scaleX(0);transform-origin:left;transition:transform .3s var(--ease)}
+    .navbar-menu .navbar-item:hover{color:var(--d-ink)} .navbar-menu .navbar-item:hover::after{transform:scaleX(1)}
+    .navbar.is-scrolled{background:rgba(255,255,255,.82);backdrop-filter:saturate(180%) blur(20px);
+      -webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom-color:var(--line)}
+    .navbar.is-scrolled .navbar-brand .navbar-item{color:var(--ink)}
+    .navbar.is-scrolled .navbar-menu .navbar-item{color:var(--ink-3)}
+    .navbar.is-scrolled .navbar-menu .navbar-item:hover{color:var(--ink)}
+    .navbar-burger{display:none;position:relative;width:44px;height:44px;margin:0;background:none;border:0;cursor:pointer}
+    .navbar-burger span{position:absolute;left:13px;width:18px;height:1.5px;background:var(--d-ink);
+      transition:transform .35s var(--ease),opacity .2s var(--ease),background .4s var(--ease)}
+    .navbar-burger span:nth-child(1){top:18px} .navbar-burger span:nth-child(2){top:23px} .navbar-burger span:nth-child(3){top:28px}
+    .navbar.is-scrolled .navbar-burger span{background:var(--ink)}
+    .navbar-burger.is-active span{background:var(--d-ink)!important}
+    .navbar-burger.is-active span:nth-child(1){top:23px;transform:rotate(45deg)}
+    .navbar-burger.is-active span:nth-child(2){opacity:0}
+    .navbar-burger.is-active span:nth-child(3){top:23px;transform:rotate(-45deg)}
+
+    /* Hero */
+    .hero{position:relative;background:var(--d-bg);color:var(--d-ink);overflow:hidden;padding-top:var(--nav-h);
+      min-height:62vh;min-height:62svh;display:flex;align-items:center}
+    .hero::before{content:"";position:absolute;inset:0;
+      background-image:linear-gradient(to right,rgba(255,255,255,.045) 1px,transparent 1px),linear-gradient(to bottom,rgba(255,255,255,.045) 1px,transparent 1px);
+      background-size:64px 64px;-webkit-mask-image:radial-gradient(ellipse 85% 75% at 50% 40%,#000 25%,transparent 78%);
+      mask-image:radial-gradient(ellipse 85% 75% at 50% 40%,#000 25%,transparent 78%)}
+    .hero::after{content:"";position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);width:80vw;height:80vw;
+      max-width:1000px;max-height:1000px;background:radial-gradient(circle,rgba(255,255,255,.11),transparent 62%);pointer-events:none}
+    .hero-body{position:relative;z-index:1;width:100%;padding-block:clamp(2.5rem,7vh,4.5rem)}
+    .hero .title{font-family:'Space Grotesk',sans-serif;font-weight:500;letter-spacing:-.035em;line-height:1.02;
+      color:var(--d-ink);font-size:clamp(2.4rem,6vw,4.6rem);margin-bottom:0}
+    .hero .subtitle{color:var(--d-ink-2)}
+    .hero .subtitle.is-hero-subtitle{color:var(--d-ink-2);font-size:clamp(1.05rem,1.7vw,1.35rem);max-width:820px;margin:1.2rem auto 0;font-weight:400;line-height:1.55}
+    .hero .subtitle .highlight{color:var(--d-ink);font-weight:500}
+    .hero .subtitle.is-4,.hero .subtitle.is-5{font-size:1.05rem;font-weight:500;margin-top:1.2rem;line-height:1.55}
+    .hero .subtitle.is-6{font-size:.85rem;margin-top:.4rem}
+    .hero .subtitle a,.authors-list a{color:var(--d-ink);border-bottom:1px solid var(--d-line)}
+    .hero .subtitle a:hover,.authors-list a:hover{border-bottom-color:var(--d-ink)}
+    .authors-list{font-size:1.02rem;line-height:1.7;margin-top:1.6rem;color:var(--d-ink-2);font-weight:500}
+    .affiliations{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--d-ink-3);margin-top:.7rem}
+    .project-links{margin-top:1.6rem}
+    .project-links a{color:var(--d-ink-2);font-size:1.2rem;margin:0 .55rem;transition:color .2s var(--ease),transform .2s var(--ease)}
+    .project-links a:hover{color:var(--d-ink);transform:translateY(-2px)}
+    .pill{display:inline-block;padding:.4rem .85rem;border-radius:100px;font-size:.68rem;font-weight:600;letter-spacing:.1em;
+      text-transform:uppercase;background:transparent;color:var(--d-ink-2);border:1px solid var(--d-line);margin:.22rem .2rem}
+
+    /* Sections / body */
+    .section.content-section{padding-block:clamp(3.5rem,8vh,6rem);border-bottom:1px solid var(--line)}
+    .section.content-section:nth-child(even){background:var(--bg-subtle)}
+    .section.content-section:last-of-type{border-bottom:none}
+    .section-title,.title.is-3.section-title{font-family:'Space Grotesk',sans-serif;font-weight:600;letter-spacing:-.03em;line-height:1.1;
+      color:var(--ink);font-size:clamp(1.7rem,3.6vw,2.3rem);margin-bottom:1.75rem!important;text-align:left!important}
+    .content{max-width:var(--readw);margin:0 auto;line-height:1.8;font-size:1.06rem;color:var(--ink-2)}
+    .content .title.is-4,.title.is-4,.content h3{font-family:'Space Grotesk',sans-serif;font-weight:600;letter-spacing:-.02em;color:var(--ink);font-size:1.3rem;margin:2.1rem 0 1rem}
+    .content .title.is-5,.title.is-5,.content h4{font-family:'Space Grotesk',sans-serif;font-weight:600;color:var(--ink);font-size:1.12rem;margin:1.6rem 0 .6rem;line-height:1.3}
+    .content p{margin-bottom:1.2rem;color:var(--ink-2)} .content strong{color:var(--ink);font-weight:600}
+    .content a{color:var(--ink);border-bottom:1px solid var(--ink-3);font-weight:500;transition:border-color .2s var(--ease)}
+    .content a:hover{border-bottom-color:var(--ink)}
+    .content ul,.content ol{margin:0 0 1.2rem 1.4rem} .content li{margin-bottom:.5rem;color:var(--ink-2)}
+    .content img{display:block;margin:1.75rem auto;max-width:100%;border:1px solid var(--line);border-radius:12px}
+    .content figure{margin:1.75rem auto;text-align:center;max-width:100%}
+    .content figure img,figure img{margin:0 auto .6rem}
+    figcaption,.content figcaption{color:var(--ink-3);font-size:.85rem;line-height:1.6;max-width:820px;margin:.4rem auto 0}
+    .math-block{margin:1.6rem 0;overflow-x:auto;text-align:center}
+    .content pre,pre{background:var(--d-bg);color:#E7E7E3;border:1px solid var(--line);border-radius:12px;padding:1.2em 1.3em;overflow:auto;font-size:.9rem;margin:1.4rem 0;line-height:1.65}
+    code{background:var(--bg-subtle-2);color:var(--ink);padding:.16em .4em;border-radius:5px;font-size:85%}
+    pre code{background:transparent;color:inherit;padding:0;font-size:inherit}
+    .notification{position:relative;background:var(--bg-subtle);border-radius:0 10px 10px 0;padding:1.1rem 1.4rem;margin:1.6rem 0;color:var(--ink-2)}
+    .message{background:var(--bg-subtle);border-left:2px solid var(--ink);border-radius:0 10px 10px 0;margin:1.6rem 0}
+    .message-body{padding:1.1rem 1.4rem;color:var(--ink-2);border:0}
+    .box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:1.5rem;margin:1rem 0;box-shadow:none;color:var(--ink-2)}
+    .has-background-light{background:var(--bg-subtle)!important}
+    .pillar-box,.book-item{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:1.25rem;height:100%;color:var(--ink-2);transition:transform .2s var(--ease),box-shadow .2s var(--ease)}
+    .book-item{font-size:.92rem;text-align:center}
+    .pillar-box:hover,.book-item:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(10,10,10,.06)}
+    .section.content-section:nth-child(even) :is(.notification,.message,.box,.pillar-box,.book-item,.diagram-container){background:#fff}
+    .columns{display:flex;flex-wrap:wrap;gap:1.5rem;margin:1rem 0} .columns.is-centered{justify-content:center} .columns.is-vcentered{align-items:center}
+    .column{flex:1 1 0;min-width:0;padding:0}
+    .column.is-4{flex:0 0 calc(33.333% - 1rem)} .column.is-5{flex:0 0 calc(41.666% - .75rem)}
+    .column.is-6,.column.is-half{flex:0 0 calc(50% - .75rem)} .column.is-one-quarter-desktop{flex:0 0 calc(25% - 1.125rem)}
+    .table-container{overflow-x:auto;margin:2rem 0;border:1px solid var(--line);border-radius:12px}
+    table.table,.table{width:100%;border-collapse:collapse;background:var(--bg);margin:0}
+    table.table th,.table th{background:var(--bg-subtle);color:var(--ink);font-weight:600;padding:1rem;text-align:left;border-bottom:2px solid var(--line)}
+    table.table td,.table td{padding:1rem;border-bottom:1px solid var(--line);color:var(--ink-2);vertical-align:top}
+    table.table tr:last-child td{border-bottom:none}
+    .diagram-container{width:100%;margin:2rem 0;text-align:center;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:1.5rem;display:block}
+    .diagram-container img{border:0;margin:0 auto}
+    .mini-caption{display:block;margin-top:.6rem;color:var(--ink-3);font-style:italic;font-size:.85rem;text-align:center}
+    .profile-image{width:100%;max-width:280px;aspect-ratio:1;object-fit:cover;border-radius:14px;border:1px solid var(--line);filter:grayscale(1)}
+    svg text{font-family:'Inter',sans-serif}
+    .button{display:inline-flex;align-items:center;gap:.5rem;padding:.6rem 1.1rem;border:1px solid var(--ink);border-radius:100px;
+      background:transparent;color:var(--ink);font-family:inherit;font-size:.72rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+      cursor:pointer;transition:background .2s var(--ease),color .2s var(--ease);margin:.25rem}
+    .button:hover,.button.is-primary,.button.is-success{background:var(--ink);color:var(--bg)!important;border-color:var(--ink)}
+
+    /* Footer */
+    .footer{background:var(--d-bg);color:var(--d-ink-2);padding-block:clamp(2.5rem,5vw,4rem);margin-top:auto;border-top:1px solid var(--d-line)}
+    .footer .content{max-width:var(--maxw);color:var(--d-ink-2)}
+    .footer .content p:first-child{font-size:.78rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:1rem;line-height:2.1}
+    .footer a{color:var(--d-ink-2);font-weight:600;transition:color .2s var(--ease)} .footer a:hover{color:var(--d-ink)}
+    .footer .content p:last-child{font-size:.85rem;color:var(--d-ink-3);letter-spacing:0;text-transform:none;font-weight:400}
+
+    @media(max-width:1023px){ .column.is-half-tablet,.column.is-one-quarter-desktop{flex:0 0 calc(50% - .75rem)} }
+    @media(max-width:820px){
+      .navbar-burger{display:block}
+      .navbar-menu{position:fixed;inset:0;background:var(--d-bg);flex-direction:column;justify-content:center;align-items:center;gap:1.5rem;
+        opacity:0;visibility:hidden;transform:translateY(-8px);z-index:150;transition:opacity .4s var(--ease),transform .4s var(--ease),visibility .4s}
+      .navbar-menu.is-active{opacity:1;visibility:visible;transform:none}
+      .navbar-end{flex-direction:column;gap:1.5rem;margin-left:0}
+      .navbar-menu .navbar-item{font-family:'Space Grotesk',sans-serif;font-size:1.4rem;font-weight:500;letter-spacing:-.01em;text-transform:none}
+      .navbar-menu .navbar-item::after{display:none}
+      .column,.column.is-4,.column.is-5,.column.is-6,.column.is-half,.column.is-half-tablet,.column.is-one-quarter-desktop{flex:1 1 100%}
+    }
+    @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} }
+  </style>
+</head>
+<body>
+
+  <nav class="navbar" role="navigation" aria-label="main navigation">
+    <div class="container">
+      <div class="navbar-brand">
+        <a class="navbar-item" href="#">Molt</a>
+        <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbarMenu"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span></a>
+      </div>
+      <div id="navbarMenu" class="navbar-menu"><div class="navbar-end">
+          <a href="#overview" class="navbar-item">Overview</a>
+          <a href="#architecture" class="navbar-item">Architecture</a>
+          <a href="#why" class="navbar-item">Why Molt</a>
+          <a href="#features" class="navbar-item">Features</a>
+          <a href="#quickstart" class="navbar-item">Quick Start</a>
+          <a href="#citation" class="navbar-item">Citation</a>
+      </div></div>
+    </div>
+  </nav>
+
+  <header class="hero is-medium">
+    <div class="hero-body"><div class="container has-text-centered">
+      <p class="eyebrow" style="color:var(--d-ink-3);margin-bottom:1rem;">Agentic Reinforcement Learning</p>
+      <h1 class="title">Molt</h1>
+      <p class="subtitle" style="font-family:'Space Grotesk',sans-serif;font-size:clamp(1.2rem,2.4vw,1.75rem);font-weight:500;letter-spacing:-.02em;color:var(--d-ink-2);margin:1rem 0 0">An Agentic-First RL Framework for Research</p>
+      <h2 class="subtitle is-hero-subtitle">Ray, vLLM, and NVIDIA AutoModel: the <span class="highlight">smallest PyTorch-native stack</span> for 1T-class fully-async, multimodal, multi-turn agentic RL. About 9.2K lines of RL code, clean enough to read end to end.</h2>
+      <div class="authors-list">Jian Hu and Molt Contributors</div>
+      <div class="affiliations">NVIDIA &nbsp;&middot;&nbsp; arXiv:2607.21653</div>
+      <div class="project-links">
+          <a href="https://arxiv.org/pdf/2607.21653" target="_blank" rel="noopener" aria-label="Paper PDF"><i class="fas fa-file-pdf"></i></a>
+          <a href="https://arxiv.org/abs/2607.21653" target="_blank" rel="noopener" aria-label="arXiv"><i class="fas fa-graduation-cap"></i></a>
+          <a href="https://huggingface.co/papers/2607.21653" target="_blank" rel="noopener" aria-label="Hugging Face">🤗</a>
+          <a href="https://github.com/NVIDIA-NeMo/labs-molt" target="_blank" rel="noopener" aria-label="Code"><i class="fab fa-github"></i></a>
+          <a href="#citation" aria-label="Citation"><i class="fas fa-quote-right"></i></a>
+      </div>
+      <div style="margin-top:1.25rem;">
+          <span class="pill">Agentic-First</span><span class="pill">Fully Async</span><span class="pill">Ray &middot; vLLM &middot; AutoModel</span><span class="pill">1T-Class MoE</span>
+      </div>
+    </div></div>
+  </header>
+
+  <main>
+    <section id="overview" class="section content-section"><div class="container">
+      <h2 class="section-title">Overview</h2>
+      <div class="content">
+        <p><strong>Molt</strong> is <strong>agentic-first</strong> and <strong>PyTorch-native</strong>. The agent is the program; the trainer is a single actor; reward is any Python you write inside an <code>Env</code> or <code>ChatAgent</code>: graders, multi-turn tools, VLM environments, LLM-as-judge. Three components carry the rest: <strong>Ray</strong> for placement and async queues, <strong>vLLM</strong> for rollout, and <strong>NVIDIA AutoModel + FSDP2</strong> for training in pure PyTorch.</p>
+        <p>That is the whole stack: about <strong>9.2K lines of RL code that scale to 1T-class MoE</strong> on vLLM with TP / EP / CP, think DeepSeek-V3 at <code>--fsdp.ep_size 256</code>, with Adam CPU offload for the largest actors. One agent API, one trainable actor, clean enough to read end to end.</p>
+        <p class="has-text-centered"><a class="button is-primary" href="https://arxiv.org/pdf/2607.21653" target="_blank" rel="noopener"><span class="icon"><i class="fas fa-file-pdf"></i></span><span>Read the Tech Report</span></a> <a class="button" href="https://github.com/NVIDIA-NeMo/labs-molt" target="_blank" rel="noopener"><span class="icon"><i class="fab fa-github"></i></span><span>Code</span></a></p>
+      </div>
+    </div></section>
+
+    <section id="architecture" class="section content-section"><div class="container">
+      <h2 class="section-title">Three Boxes, One Async Loop</h2>
+      <div class="content">
+        <figure><img src="assets/molt.jpg" alt="Molt architecture: Agent, vLLM rollout, Ray async queue, single-actor AutoModel/FSDP2 trainer, fully async."><figcaption><strong>Figure:</strong> Molt's architecture. An agent drives vLLM rollout, a Ray async queue connects it to a single-actor AutoModel/FSDP2 trainer, and rollout, training, and weight sync overlap fully.</figcaption></figure>
+        <p><strong>Ray</strong> owns placement and the async queue between the three boxes; that is the entire runtime. The contract is <strong>token-first</strong>: token ids, logprobs, action ranges, rewards, and multimodal tensors stay aligned from rollout to training. Anything you can compute in Python is a valid reward, including LLM-as-judge calls back through the same vLLM engines that drive rollout.</p>
+      </div>
+    </div></section>
+
+    <section id="why" class="section content-section"><div class="container">
+      <h2 class="section-title">Why Molt</h2>
+      <div class="content">
+        <div class="columns is-multiline">
+          <div class="column is-4"><div class="pillar-box"><span class="eyebrow">01</span><h3 style="margin-top:.4rem">Agentic-first</h3><p>One Gymnasium-aligned API, <code>Env.step()</code> or <code>ChatAgent.run()</code>, covers graders, multi-turn tools, VLM environments, and OpenAI/Anthropic-compatible servers. Iterate on environments in plain Python; the trainer stays untouched.</p></div></div>
+          <div class="column is-4"><div class="pillar-box"><span class="eyebrow">02</span><h3 style="margin-top:.4rem">Fully-async runtime</h3><p>Ray placement, async rollout queues, vLLM engines, partial rollout, and weight sync overlap, so a DeepSeek-V3-class actor stays fed without bespoke infrastructure.</p></div></div>
+          <div class="column is-4"><div class="pillar-box"><span class="eyebrow">03</span><h3 style="margin-top:.4rem">PyTorch-native</h3><p>FSDP2 + NVIDIA AutoModel, pure PyTorch end to end. Hack the model in the language you already write, with no backend ceremony.</p></div></div>
+          <div class="column is-4"><div class="pillar-box"><span class="eyebrow">04</span><h3 style="margin-top:.4rem">Single-actor simplicity</h3><p>One actor with an optional KL reference; the whole RL graph fits on a page. Every gradient is explicit, and every loss term is one file away.</p></div></div>
+          <div class="column is-4"><div class="pillar-box"><span class="eyebrow">05</span><h3 style="margin-top:.4rem">Frontier-scale MoE</h3><p>AutoModel + FSDP2 with TP / EP / CP and Adam CPU offload, MoE-native. The same script that trains 8B scales to 1T-class MoE with no rewrite between scales.</p></div></div>
+          <div class="column is-4"><div class="pillar-box"><span class="eyebrow">06</span><h3 style="margin-top:.4rem">Small, hackable surface</h3><p>About 9.2K LOC of RL code across three thin layers with a token-first data contract. Fork one layer without touching the others; read it in an afternoon.</p></div></div>
+        </div>
+        <div class="table-container"><table class="table">
+          <thead><tr><th></th><th>Molt</th><th>OpenRLHF</th><th>verl</th><th>slime</th></tr></thead>
+          <tbody>
+            <tr><td>Training backend</td><td><strong>PyTorch / FSDP2 + NVIDIA AutoModel</strong></td><td>DeepSpeed ZeRO-3</td><td>FSDP / FSDP2 / Megatron</td><td>Megatron (FSDP exp.)</td></tr>
+            <tr><td>Rollout engine</td><td>vLLM (Ray)</td><td>vLLM (Ray)</td><td>vLLM / SGLang / TRT-LLM</td><td>SGLang only</td></tr>
+            <tr><td>RL topology</td><td><strong>actor (+ optional PPO critic)</strong></td><td>actor + critic + RM</td><td>actor + critic + RM</td><td>actor + critic + RM</td></tr>
+            <tr><td>Reward source</td><td><strong>agent Python</strong></td><td>agent / endpoint / RM</td><td>agent / RM / endpoint</td><td>rollout fn / RM</td></tr>
+            <tr><td>Parallelism</td><td><strong>TP / EP / CP, MoE-native</strong></td><td>ZeRO-3 / FSDP</td><td>TP / PP / EP / SP</td><td>TP / PP / DP / CP / EP</td></tr>
+            <tr><td>RL code size</td><td><strong>~9.2K LOC</strong></td><td>~7.2K</td><td>~62K</td><td>~25K</td></tr>
+            <tr><td>Design center</td><td><strong>agentic-first research</strong></td><td>RLHF coverage</td><td>production breadth</td><td>Megatron throughput</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div></section>
+
+    <section id="features" class="section content-section"><div class="container">
+      <h2 class="section-title">Features</h2>
+      <div class="content">
+        <div class="columns is-multiline">
+          <div class="column is-6"><div class="box"><h3>Algorithms</h3><p>Estimators: <code>reinforce</code>, <code>reinforce_baseline</code>, <code>rloo</code>, <code>grpo</code>, <code>dr_grpo</code>, <code>gae</code> (PPO with a value model on its own Ray group), and <code>on_policy_distill</code>. Optional reference workers provide KL regularization; the reference doubles as the distillation teacher.</p></div></div>
+          <div class="column is-6"><div class="box"><h3>On-policy distillation</h3><p>One switch turns the reference model into a frozen teacher and makes per-token reverse KL to it the entire training signal: no scalar reward, no group baseline, no whitening. Point the agent path at a real tool-use agent to distill a multi-turn distribution.</p></div></div>
+          <div class="column is-6"><div class="box"><h3>IS correction</h3><p>Async and partial rollout make the training-side logprobs diverge from vLLM's generation-time logprobs. Molt corrects the off-policy update with gated per-token importance ratios: <code>token</code>, <code>seq</code>, or <code>geo</code> granularity crossed with <code>mask</code>, <code>clip</code>, or <code>trunc</code> treatment, covering TIS, IcePop, and MIS-style sequence masking.</p></div></div>
+          <div class="column is-6"><div class="box"><h3>MoE routing stability</h3><p>Rollout and training routers pick experts independently, which breaks importance sampling. Molt closes the gap with fp32 router precision, Rollout Routing Replay (R3) that replays vLLM's exact top-k selection in the training forward, and an optional router freeze.</p></div></div>
+          <div class="column is-6"><div class="box"><h3>Multimodal, multi-turn agents</h3><p>Text and VLM prompts with image payloads; assistant spans are derived from the model's own chat template. Context compaction is detected automatically: a rewritten prefix seals the current token-exact segment and starts a fresh one, so external harnesses work unchanged.</p></div></div>
+          <div class="column is-6"><div class="box"><h3>MTP speculative rollout</h3><p>Checkpoints that ship a multi-token-prediction head can speed up generation via vLLM speculative decoding with one flag. Acceptance is by rejection sampling, so rollout logprobs stay unbiased for the RL objective; it changes throughput, never the learned policy.</p></div></div>
+        </div>
+      </div>
+    </div></section>
+
+    <section id="quickstart" class="section content-section"><div class="container">
+      <h2 class="section-title">Quick Start</h2>
+      <div class="content">
+        <p>Install from the repo (or pull the prebuilt container, recommended for the full CUDA stack):</p>
+<pre><code>git clone https://github.com/NVIDIA-NeMo/labs-molt.git
+cd labs-molt
+pip install -e ".[vllm]"      # or: docker pull hijkzzz/molt:latest
+# checkout-free: pip install "molt-rl[vllm]"</code></pre>
+        <p>Launch RL with one trainable actor and your agent as the reward:</p>
+<pre><code>python3 -m molt.cli.train_rl_ray \
+  --actor.model_name_or_path /path/to/automodel \
+  --data.prompt_dataset /path/to/prompts.jsonl \
+  --data.input_key input \
+  --train.agent_path examples/python/agents/math.py \
+  --vllm.num_engines 2 \
+  --vllm.tensor_parallel_size 2 \
+  --rollout.batch_size 128 \
+  --train.batch_size 128 \
+  --train.micro_batch_size 1 \
+  --algo.advantage.estimator reinforce \
+  --algo.kl.init_coef 0 \
+  --fsdp.attn_implementation te \
+  --ckpt.output_dir ./ckpt/rl</code></pre>
+        <p>Reference recipes under <code>examples/scripts/</code> span Qwen3-4B dense text RL, Qwen3.6-35B-A3B VLM RL with a multi-turn Python tool, Nemotron-Omni-30B-A3B hybrid SSM MoE at CP8+EP8, on-policy distillation, and GLM-5.2 ~750B RL at EP256.</p>
+      </div>
+    </div></section>
+
+    <section id="citation" class="section content-section"><div class="container">
+      <h2 class="section-title">Citation</h2>
+      <div class="content">
+        <p>If you use Molt in your research, please cite:</p>
+<pre id="cite-bibtex"><code>@article{hu2026molt,
+  title         = {Molt: A Scalable PyTorch-Native Training Framework for Agentic Reinforcement Learning},
+  author        = {Jian Hu and Molt Contributors},
+  year          = {2026},
+  eprint        = {2607.21653},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  url           = {https://arxiv.org/abs/2607.21653}
+}</code></pre>
+        <p><button id="copy-cite" class="button"><span class="icon"><i class="fas fa-clipboard"></i></span><span>Copy BibTeX</span></button></p>
+      </div>
+    </div></section>
+  </main>
+
+  <footer class="footer"><div class="container"><div class="content has-text-centered">
+    <p><a href="#overview">Overview</a> &nbsp;&bull;&nbsp; <a href="#architecture">Architecture</a> &nbsp;&bull;&nbsp; <a href="#features">Features</a> &nbsp;&bull;&nbsp; <a href="#citation">Citation</a> &nbsp;&bull;&nbsp; <a href="https://github.com/NVIDIA-NeMo/labs-molt">GitHub</a> &nbsp;&bull;&nbsp; <a href="https://yfz.ai/blog">Yifan's Blog</a></p>
+    <p>&copy; 2026 Molt Contributors. Apache License 2.0.</p>
+  </div></div></footer>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const navbar = document.querySelector('.navbar');
+      const hero = document.querySelector('.hero');
+      const burgers = Array.from(document.querySelectorAll('.navbar-burger'));
+      if (navbar && hero && 'IntersectionObserver' in window) {
+        new IntersectionObserver(([e]) => navbar.classList.toggle('is-scrolled', !e.isIntersecting),
+          { rootMargin: '-69px 0px 0px 0px', threshold: 0 }).observe(hero);
+      }
+      const closeMenu = () => {
+        document.querySelectorAll('.navbar-burger.is-active').forEach(b => b.classList.remove('is-active'));
+        document.querySelectorAll('.navbar-menu.is-active').forEach(m => m.classList.remove('is-active'));
+        document.body.classList.remove('nav-open');
+      };
+      burgers.forEach(el => el.addEventListener('click', () => {
+        const target = document.getElementById(el.dataset.target);
+        el.classList.toggle('is-active'); if (target) target.classList.toggle('is-active');
+        document.body.classList.toggle('nav-open', el.classList.contains('is-active'));
+      }));
+      document.querySelectorAll('.navbar-menu .navbar-item').forEach(a => a.addEventListener('click', closeMenu));
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+      const btn = document.getElementById('copy-cite'), pre = document.getElementById('cite-bibtex');
+      if (btn && pre) { btn.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(pre.innerText); btn.classList.add('is-success');
+          btn.innerHTML = '<span class="icon"><i class="fas fa-check"></i></span><span>Copied</span>';
+          setTimeout(() => { btn.classList.remove('is-success'); btn.innerHTML = '<span class="icon"><i class="fas fa-clipboard"></i></span><span>Copy BibTeX</span>'; }, 1600);
+        } catch (e) { const r=document.createRange(); r.selectNode(pre); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); try{document.execCommand('copy')}catch(_){}; s.removeAllRanges(); }
+      }); }
+    });
+  </script>
+</body>
+</html>
