@@ -38,6 +38,7 @@ from molt.trainer.fsdp.refit import gather_full_param
 from molt.utils import get_tokenizer
 from molt.utils.distributed_util import stateless_init_process_group, torch_dist_barrier_and_cuda_sync
 from molt.utils.logging_utils import init_logger
+from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics
 from molt.utils.vlm_utils import merge_mm_train_inputs
 
 from ..algorithm import NaiveReplayBuffer
@@ -110,6 +111,20 @@ class PolicyTrainer:
                 else None
             ),
         )
+        self.logprob_audit_writer = None
+        audit_dir = getattr(self.args.train, "logprob_audit_dir", None)
+        if audit_dir and torch.distributed.get_rank() == 0:
+            self.logprob_audit_writer = LogprobAuditWriter(
+                audit_dir,
+                getattr(self.args.train, "logprob_audit_max_action_tokens", 100000),
+                {
+                    "run_id": getattr(self.args.train, "logprob_audit_run_id", None),
+                    "model_name_or_path": self.args.actor.model_name_or_path,
+                    "world_size": torch.distributed.get_world_size(),
+                    "is_correction_level": self.args.algo.advantage.is_correction_level,
+                    "is_correction_mode": self.args.algo.advantage.is_correction_mode,
+                },
+            )
 
         # Add the MoE router load-balancing aux loss only when its coefficient is set.
         self.aux_loss = self.args.actor.aux_loss_coef > 1e-8
@@ -403,6 +418,22 @@ class PolicyTrainer:
             # R3-replayed routing (they are the same forward) — the importance ratio needs
             # both log-probs computed under the rollout's expert selection.
             old_action_log_probs = action_log_probs.detach()
+
+        if rollout_log_probs is not None:
+            experience.info.update(
+                compute_logprob_audit_metrics(action_log_probs, rollout_log_probs, action_mask)
+            )
+            if self.logprob_audit_writer is not None:
+                self.logprob_audit_writer.write_batch(
+                    sequences,
+                    action_mask,
+                    action_log_probs,
+                    rollout_log_probs,
+                    info=experience.info,
+                    indices=experience.index,
+                    group_ids=experience.group_ids,
+                    rollout_ids=experience.rollout_ids,
+                )
 
         # Debug observability: MOLT_DUMP_ROLLOUT_LOGPROBS=<path> dumps per-position
         # token_id / rollout(vLLM) logprob / actor recomputed logprob for the first

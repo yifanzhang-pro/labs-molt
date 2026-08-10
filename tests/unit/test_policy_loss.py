@@ -81,6 +81,51 @@ def test_force_on_policy_reinforce_still_applies_is_correction():
     torch.testing.assert_close(vllm_kl, torch.tensor(-0.1))
 
 
+def test_raw_local_is_applies_unbounded_token_ratio():
+    loss_fn = PolicyLoss(is_correction_level="token", is_correction_mode="raw")
+    logp = torch.zeros(1, 2, requires_grad=True)
+    rollout = torch.full((1, 2), -math.log(3.0))
+
+    loss, *_, is_filter_ratio = loss_fn(
+        logp,
+        logp.detach(),
+        torch.ones(1, 2),
+        action_mask=torch.ones(1, 2, dtype=torch.bool),
+        rollout_log_probs=rollout,
+    )
+    loss.backward()
+
+    torch.testing.assert_close(loss, torch.tensor(-3.0))
+    torch.testing.assert_close(is_filter_ratio, torch.tensor(0.0))
+    torch.testing.assert_close(logp.grad, torch.full((1, 2), -1.5))
+
+
+@pytest.mark.parametrize(
+    "old,rollout",
+    [
+        (torch.tensor([[float("nan")]]), torch.zeros(1, 1)),
+        (torch.zeros(1, 1), torch.tensor([[-torch.inf]])),
+        (torch.full((1, 1), 1000.0), torch.zeros(1, 1)),
+    ],
+)
+def test_raw_local_is_fails_on_nonfinite_probability_or_ratio(old, rollout):
+    loss_fn = PolicyLoss(is_correction_level="token", is_correction_mode="raw")
+    with pytest.raises(FloatingPointError, match="raw local IS"):
+        loss_fn(
+            old,
+            old,
+            torch.ones(1, 1),
+            action_mask=torch.ones(1, 1, dtype=torch.bool),
+            rollout_log_probs=rollout,
+        )
+
+
+@pytest.mark.parametrize("level", ["off", "seq", "geo"])
+def test_raw_local_is_requires_token_level(level):
+    with pytest.raises(ValueError, match="requires is_correction_level=token"):
+        PolicyLoss(is_correction_level=level, is_correction_mode="raw")
+
+
 def test_tis_caps_large_importance_weights_without_flooring_small_weights():
     loss_fn = PolicyLoss(
         is_correction_threshold=[0.5, 2.0],

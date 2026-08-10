@@ -309,8 +309,10 @@ class PolicyLoss(nn.Module):
 
         if self.is_correction_level not in {"off", "token", "seq", "geo"}:
             raise ValueError(f"is_correction_level must be off/token/seq/geo, got {self.is_correction_level}")
-        if self.is_correction_mode not in {"mask", "clip", "trunc"}:
-            raise ValueError(f"is_correction_mode must be mask/clip/trunc, got {self.is_correction_mode}")
+        if self.is_correction_mode not in {"mask", "clip", "trunc", "raw"}:
+            raise ValueError(f"is_correction_mode must be mask/clip/trunc/raw, got {self.is_correction_mode}")
+        if self.is_correction_mode == "raw" and self.is_correction_level != "token":
+            raise ValueError("is_correction_mode=raw requires is_correction_level=token")
         # seq/geo aggregate the ratio into a per-sequence GATE; survivors keep their
         # per-token IS weight, so only mask (reject out-of-band sequences) is meaningful.
         # clip/trunc would replace the per-token weight with one clamped sequence weight,
@@ -362,15 +364,27 @@ class PolicyLoss(nn.Module):
         if self.is_correction_level != "off":
             if rollout_log_probs is None:
                 raise ValueError("rollout_log_probs is required when IS correction is enabled")
-            low, high = self.is_correction_threshold
-            # per-token off-policy log-ratio  log(pi_train / pi_rollout)
-            is_log_ratio = torch.nan_to_num(
-                old_log_probs.float() - rollout_log_probs.float(),
-                nan=0.0,
-                posinf=log_ratio_limit,
-                neginf=-log_ratio_limit,
-            ).clamp(min=-log_ratio_limit, max=log_ratio_limit)
-            token_ratio = torch.exp(is_log_ratio).detach()
+            # per-token off-policy log-ratio log(pi_train / pi_rollout). Raw mode
+            # is the experiment path: no sanitization or clipping is allowed, and
+            # a selected action with nonfinite probability/ratio fails closed.
+            raw_is_log_ratio = old_log_probs.float() - rollout_log_probs.float()
+            if self.is_correction_mode == "raw":
+                selected = action_mask.bool() if action_mask is not None else torch.ones_like(raw_is_log_ratio).bool()
+                invalid_inputs = selected & (~torch.isfinite(old_log_probs) | ~torch.isfinite(rollout_log_probs))
+                if invalid_inputs.any():
+                    raise FloatingPointError("raw local IS received nonfinite learner or rollout log-probability")
+                is_log_ratio = torch.where(selected, raw_is_log_ratio, torch.zeros_like(raw_is_log_ratio))
+                token_ratio = torch.exp(is_log_ratio).detach()
+                if (selected & ~torch.isfinite(token_ratio)).any():
+                    raise FloatingPointError("raw local IS importance ratio is nonfinite")
+            else:
+                is_log_ratio = torch.nan_to_num(
+                    raw_is_log_ratio,
+                    nan=0.0,
+                    posinf=log_ratio_limit,
+                    neginf=-log_ratio_limit,
+                ).clamp(min=-log_ratio_limit, max=log_ratio_limit)
+                token_ratio = torch.exp(is_log_ratio).detach()
 
             # (1) per-UNIT off-policy ratio (unit = token, or per-sequence for
             # seq/geo — kept at [B, 1] so the filter metric can stay per-sequence).
@@ -387,16 +401,22 @@ class PolicyLoss(nn.Module):
 
             # (2) gate the per-unit ratio (is_correction_mode) -> per-token coefficient
             # + per-unit filtered flag.
-            if self.is_correction_mode == "mask":
+            if self.is_correction_mode == "raw":
+                coef = token_ratio
+                unit_filtered = torch.zeros_like(token_ratio, dtype=torch.bool)
+            elif self.is_correction_mode == "mask":
+                low, high = self.is_correction_threshold
                 # Drop out-of-band units; weight the survivors by their per-token ratio.
                 keep = (unit_ratio >= low) & (unit_ratio <= high)
                 coef = torch.where(keep.expand_as(token_ratio), token_ratio, torch.zeros_like(token_ratio))
                 unit_filtered = ~keep
             elif self.is_correction_mode == "clip":
+                low, high = self.is_correction_threshold
                 # Keep every unit, clamp its weight into [low, high] (applied per-token).
                 coef = unit_ratio.clamp(min=low, max=high).expand_as(token_ratio)
                 unit_filtered = (unit_ratio < low) | (unit_ratio > high)
             else:  # "trunc" — cap only the upper tail; small weights unchanged.
+                _low, high = self.is_correction_threshold
                 coef = unit_ratio.clamp(max=high).expand_as(token_ratio)
                 unit_filtered = unit_ratio > high
 
