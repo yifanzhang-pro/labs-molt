@@ -326,6 +326,11 @@ class BaseRLTrainer:
         t0 = time.time()
         experiences = balance_experiences(rollout_samples, self.args)
         experiences = self.experience_maker.build_experiences(experiences)
+        for experience in experiences:
+            sample_count = (
+                int(experience.rewards.numel()) if experience.rewards is not None else len(experience.index or [])
+            )
+            experience.info["learner_version"] = torch.full((sample_count,), global_step, dtype=torch.long)
         make_experience_time = time.time() - t0
 
         # Peek at the first sample's token ids for a sanity log. If it is still lazy, fetch its heavy
@@ -777,6 +782,13 @@ class GenerateSamplesActor:
                         logger.info(f"[rollout_dump] wrote {len(rollout_samples)} samples to {dump_path}")
 
                 if rollout_samples:
+                    for sample in rollout_samples:
+                        sample_count = (
+                            int(sample.rewards.numel()) if sample.rewards is not None else len(sample.index or [])
+                        )
+                        sample.info["rollout_actor_version"] = torch.full(
+                            (sample_count,), global_step, dtype=torch.long
+                        )
                     client_states = {
                         "episode": ep,
                         "total_consumed_prompts": total_consumed_prompts,

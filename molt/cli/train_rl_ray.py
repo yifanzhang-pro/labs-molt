@@ -79,6 +79,9 @@ def train(args):
     # prompts) or multi-turn agents, set --data.max_len high enough to fit
     # the longest expanded prompt plus rollout.max_new_tokens.
     max_len = args.data.max_len
+    capture_rollout_logprobs = args.algo.advantage.is_correction_level != "off" or bool(
+        args.train.logprob_audit_dir
+    )
     if args.vllm.num_engines is not None and args.vllm.num_engines > 0:
         vllm_engines = create_vllm_engines(
             args.vllm.num_engines,
@@ -89,7 +92,7 @@ def train(args):
             args.vllm.enforce_eager,
             max_len,
             args.vllm.gpu_memory_utilization,
-            "processed_logprobs" if args.algo.advantage.is_correction_level != "off" else None,
+            "processed_logprobs" if capture_rollout_logprobs else None,
             max_images_per_prompt=getattr(args.data, "max_images_per_prompt", 0),
             mm_encoder_attn_backend=args.vllm.mm_encoder_attn_backend,
             gdn_prefill_backend=args.vllm.gdn_prefill_backend,
@@ -470,9 +473,10 @@ if __name__ == "__main__":
         "--algo.advantage.is_correction_mode",
         type=str,
         default="mask",
-        choices=["mask", "clip", "trunc"],
+        choices=["mask", "clip", "trunc", "raw"],
         help="Bound treatment (token level only for clip/trunc): mask (drop out-of-band units, zero "
-        "gradient), clip (clamp the weight into [low, high]), trunc (clamp only the upper tail).",
+        "gradient), clip (clamp the weight into [low, high]), trunc (clamp only the upper tail), "
+        "or raw (unbounded token-local IS; fail on nonfinite probabilities/ratios).",
     )
     parser.add_argument(
         "--algo.advantage.is_correction_threshold",
@@ -801,6 +805,24 @@ if __name__ == "__main__":
         "cost of the generate/train overlap.",
     )
     parser.add_argument(
+        "--train.logprob_audit_dir",
+        type=str,
+        default=None,
+        help="Write bounded rollout-versus-learner JSONL audit records to this new directory.",
+    )
+    parser.add_argument(
+        "--train.logprob_audit_max_action_tokens",
+        type=int,
+        default=100000,
+        help="Maximum action-token count across whole-trajectory audit records.",
+    )
+    parser.add_argument(
+        "--train.logprob_audit_run_id",
+        type=str,
+        default=None,
+        help="Immutable run/config identifier stored in the audit header.",
+    )
+    parser.add_argument(
         "--train.routing_replay",
         action="store_true",
         default=False,
@@ -956,6 +978,14 @@ if __name__ == "__main__":
         assert args.rollout.n_samples_per_prompt > 1, (
             "n_samples_per_prompt must be greater than 1 when using dynamic filtering"
         )
+
+    if args.algo.advantage.is_correction_mode == "raw" and args.algo.advantage.is_correction_level != "token":
+        raise ValueError("--algo.advantage.is_correction_mode raw requires is_correction_level token")
+    if args.train.logprob_audit_dir:
+        if args.train.logprob_audit_max_action_tokens <= 0:
+            raise ValueError("--train.logprob_audit_max_action_tokens must be positive")
+        if not args.train.logprob_audit_run_id:
+            raise ValueError("--train.logprob_audit_run_id is required when log-probability audit is enabled")
 
     if args.algo.advantage.is_correction_level == "off":
         # The HTTP router path can't observe a mid-request weight swap, so off_policy_len is always 0

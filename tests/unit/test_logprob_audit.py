@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import json
+import math
+
+import torch
+
+from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics
+
+
+def test_logprob_audit_metrics_use_only_action_tokens_and_report_raw_ratio():
+    learner = torch.tensor([[0.0, math.log(2.0), 99.0]])
+    rollout = torch.zeros(1, 3)
+    mask = torch.tensor([[True, True, False]])
+
+    metrics = compute_logprob_audit_metrics(learner, rollout, mask)
+
+    torch.testing.assert_close(metrics["audit/delta_mean"], torch.tensor(math.log(2.0) / 2.0))
+    torch.testing.assert_close(metrics["audit/ratio_mean"], torch.tensor(1.5))
+    torch.testing.assert_close(metrics["audit/ratio_second_moment"], torch.tensor(2.5))
+    torch.testing.assert_close(metrics["audit/microbatch_ess"], torch.tensor(9.0 / 5.0))
+    torch.testing.assert_close(metrics["audit/nonfinite_rate"], torch.tensor(0.0))
+
+
+def test_logprob_audit_metrics_surface_nonfinite_and_support_failure():
+    learner = torch.tensor([[0.0, 0.0]])
+    rollout = torch.tensor([[-torch.inf, torch.nan]])
+    mask = torch.ones(1, 2, dtype=torch.bool)
+
+    metrics = compute_logprob_audit_metrics(learner, rollout, mask)
+
+    torch.testing.assert_close(metrics["audit/nonfinite_rate"], torch.tensor(1.0))
+    torch.testing.assert_close(metrics["audit/support_violation_rate"], torch.tensor(0.5))
+
+
+def test_logprob_audit_writer_retains_prefix_alignment_and_versions(tmp_path):
+    writer = LogprobAuditWriter(str(tmp_path), max_action_tokens=2, metadata={"run_id": "test"})
+    written = writer.write_batch(
+        torch.tensor([[10, 11, 12, 13]]),
+        torch.tensor([[False, True, True]]),
+        torch.tensor([[-9.0, -0.2, -0.3]]),
+        torch.tensor([[-8.0, -0.4, -0.7]]),
+        info={"rollout_actor_version": torch.tensor([4]), "learner_version": torch.tensor([5])},
+        indices=[7],
+        group_ids=["group"],
+        rollout_ids=["rollout"],
+    )
+
+    assert written == 2
+    rows = [json.loads(line) for line in (tmp_path / "audit_records.jsonl").read_text().splitlines()]
+    assert rows[0]["record_type"] == "header"
+    record = rows[1]
+    assert record["sequence_token_ids"] == [10, 11, 12, 13]
+    assert record["action_step_positions"] == [1, 2]
+    assert record["action_token_ids"] == [12, 13]
+    assert record["rollout_actor_version"] == 4
+    assert record["learner_version"] == 5
+
+
+def test_logprob_audit_writer_does_not_split_trajectory_at_budget(tmp_path):
+    writer = LogprobAuditWriter(str(tmp_path), max_action_tokens=1, metadata={})
+    written = writer.write_batch(
+        torch.tensor([[1, 2, 3]]),
+        torch.tensor([[True, True]]),
+        torch.zeros(1, 2),
+        torch.zeros(1, 2),
+        info={},
+        indices=None,
+        group_ids=[],
+        rollout_ids=[],
+    )
+
+    assert written == 0
+    assert len((tmp_path / "audit_records.jsonl").read_text().splitlines()) == 1
