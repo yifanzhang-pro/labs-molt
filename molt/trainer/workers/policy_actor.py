@@ -38,7 +38,7 @@ from molt.trainer.fsdp.refit import gather_full_param
 from molt.utils import get_tokenizer
 from molt.utils.distributed_util import stateless_init_process_group, torch_dist_barrier_and_cuda_sync
 from molt.utils.logging_utils import init_logger
-from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics, rank_action_token_budget
+from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics
 from molt.utils.vlm_utils import merge_mm_train_inputs
 
 from ..algorithm import NaiveReplayBuffer
@@ -117,7 +117,8 @@ class PolicyTrainer:
             rank = torch.distributed.get_rank()
             world_size = torch.distributed.get_world_size()
             total_budget = getattr(self.args.train, "logprob_audit_max_action_tokens", 100000)
-            rank_budget = rank_action_token_budget(total_budget, rank, world_size)
+            rank_budget, remainder = divmod(total_budget, world_size)
+            rank_budget += int(rank < remainder)
             if rank_budget > 0:
                 self.logprob_audit_writer = LogprobAuditWriter(
                     audit_dir,
