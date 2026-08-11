@@ -109,14 +109,14 @@ def _float_status(value: torch.Tensor) -> str:
 
 def _metadata_value(info: dict[str, Any], key: str, index: int) -> Any:
     value = info.get(key)
-    if isinstance(value, torch.Tensor):
-        if value.dim() == 0:
-            return value.item()
-        if index < value.shape[0]:
-            return value[index].item()
-        return None
     if isinstance(value, list):
-        return value[index] if index < len(value) else None
+        value = value[index] if index < len(value) else None
+    elif isinstance(value, torch.Tensor) and value.dim() > 0:
+        value = value[index] if index < value.shape[0] else None
+    if isinstance(value, torch.Tensor):
+        if value.numel() != 1:
+            raise ValueError(f"audit metadata {key} must be scalar per sample")
+        return value.item()
     return value
 
 

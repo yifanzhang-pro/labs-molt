@@ -61,6 +61,24 @@ def test_logprob_audit_writer_retains_prefix_alignment_and_versions(tmp_path):
     assert record["support_violations"] == [False, False]
 
 
+def test_logprob_audit_writer_serializes_batched_scalar_tensor_versions(tmp_path):
+    writer = LogprobAuditWriter(str(tmp_path), max_action_tokens=1, metadata={})
+    writer.write_batch(
+        torch.tensor([[1, 2]]),
+        torch.tensor([[True]]),
+        torch.zeros(1, 1),
+        torch.zeros(1, 1),
+        info={"rollout_actor_version": [torch.tensor(4)], "learner_version": [torch.tensor(5)]},
+        indices=[0],
+        group_ids=[],
+        rollout_ids=[],
+    )
+
+    rows = [json.loads(line) for line in (tmp_path / "audit_records.jsonl").read_text().splitlines()]
+    assert rows[1]["rollout_actor_version"] == 4
+    assert rows[1]["learner_version"] == 5
+
+
 def test_logprob_audit_writer_preserves_nonfinite_classes_and_support(tmp_path):
     writer = LogprobAuditWriter(str(tmp_path), max_action_tokens=2, metadata={})
     writer.write_batch(
