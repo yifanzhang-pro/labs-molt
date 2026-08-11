@@ -78,6 +78,18 @@ _CUSTOM_ATTN_IMPLEMENTATIONS = {"te", "sdpa", "flex", "tilelang"}
 _ALL_ATTN_IMPLEMENTATIONS = _HF_ATTN_IMPLEMENTATIONS | _CUSTOM_ATTN_IMPLEMENTATIONS
 
 
+def _automodel_freeze_config(freeze_visual_encoder: bool) -> Optional[dict[str, bool]]:
+    """Return the pre-shard AutoModel freeze contract for a visual encoder."""
+    if not freeze_visual_encoder:
+        return None
+    return {
+        "freeze_vision_tower": True,
+        "freeze_audio_tower": False,
+        "freeze_language_model": False,
+        "freeze_video_embedder": False,
+    }
+
+
 def _validate_attn_implementation(attn_implementation: str) -> None:
     if attn_implementation not in _ALL_ATTN_IMPLEMENTATIONS:
         choices = ", ".join(sorted(_ALL_ATTN_IMPLEMENTATIONS))
@@ -347,6 +359,11 @@ class BaseModel(nn.Module):
         # rounds away AdamW updates (~LR < bf16 ULP) at small LR, so the MoE never learns.
         torch_dtype = compute_dtype if not use_fp32_master_weights else torch.float32
         self.is_vlm = is_vlm_model(pretrain_or_model)
+        effective_freeze_visual = freeze_visual_encoder
+        if self.is_vlm and self.cp_size > 1 and not freeze_visual_encoder:
+            effective_freeze_visual = True
+            if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+                print("[VLM] cp_size>1 forces freeze_visual_encoder=True (CP trains the language stack only).")
 
         if self.is_vlm:
             from nemo_automodel import NeMoAutoModelForImageTextToText as ModelCls
@@ -438,10 +455,13 @@ class BaseModel(nn.Module):
             use_liger_kernel=False,
             has_packed_sequence=packing_samples,
             force_hf=False,
-            freeze_config={"freeze_vision_tower": True} if freeze_visual_encoder else None,
             # Disable the MTP head via AutoModel's config-override deep-merge (see
             # _mtp_off_kwargs); no-op without MTP.
             **_mtp_off_kwargs(pretrain_or_model),
+            # AutoModel must freeze the vision tower before activation-checkpoint
+            # selection and FSDP sharding. Post-load requires_grad changes leave
+            # frozen layers wrapped and can retain optimizer/sharding overhead.
+            freeze_config=_automodel_freeze_config(effective_freeze_visual),
             **backend_kwarg,
         )
         self.model = move_model_to_cpu_for_offload(self.model, distributed_config)
@@ -487,6 +507,25 @@ class BaseModel(nn.Module):
         if self.packing_samples:
             print("[Packing] Using AutoModel THD/TE packed path.")
 
+        # VLM: optionally freeze the vision encoder so only the language backbone
+        # trains (language params live under "language_model.*" / "lm_head.*").
+        #
+        # CP>1 forces freezing the vision tower: the established VLM+CP recipe trains
+        # only the language stack (the model now embeds + shards the sequence inside
+        # its own forward), and freezing keeps optimizer state off never-updated vision
+        # params. Matches the pre-migration behavior, so CP metrics stay comparable.
+        if effective_freeze_visual:
+            unexpected_trainable = [
+                name
+                for name, param in self.model.named_parameters()
+                if "language_model" not in name and "lm_head" not in name and param.requires_grad
+            ]
+            if unexpected_trainable:
+                examples = unexpected_trainable[:8]
+                raise RuntimeError(
+                    "AutoModel pre-shard visual freeze left non-language parameters trainable; "
+                    f"examples={examples}"
+                )
         # Optionally freeze the MoE router/gate (keeps vLLM-vs-actor routing identical,
         # stabilizes training). Match by isinstance(Gate), NOT by name: the path varies by
         # arch and a `gate` name match would also catch the gated-MLP `gate_proj.weight`,
