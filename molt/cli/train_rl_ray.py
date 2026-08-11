@@ -814,7 +814,7 @@ if __name__ == "__main__":
         "--train.logprob_audit_max_action_tokens",
         type=int,
         default=100000,
-        help="Maximum action-token count across whole-trajectory audit records.",
+        help="Maximum action-token count across all rank-sharded whole-trajectory audit records.",
     )
     parser.add_argument(
         "--train.logprob_audit_run_id",

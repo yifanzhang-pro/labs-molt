@@ -120,15 +120,34 @@ def _metadata_value(info: dict[str, Any], key: str, index: int) -> Any:
     return value
 
 
+def rank_action_token_budget(total_budget: int, rank: int, world_size: int) -> int:
+    """Distribute one run-wide audit budget deterministically across ranks."""
+
+    if total_budget <= 0:
+        raise ValueError("total audit budget must be positive")
+    if world_size <= 0 or rank < 0 or rank >= world_size:
+        raise ValueError("invalid distributed rank or world size")
+    rank_budget, remainder = divmod(total_budget, world_size)
+    return rank_budget + int(rank < remainder)
+
+
 class LogprobAuditWriter:
     """Write whole-trajectory JSONL records up to an action-token budget."""
 
-    def __init__(self, output_dir: str, max_action_tokens: int, metadata: dict[str, Any]):
+    def __init__(
+        self,
+        output_dir: str,
+        max_action_tokens: int,
+        metadata: dict[str, Any],
+        filename: str = "audit_records.jsonl",
+    ):
         if max_action_tokens <= 0:
             raise ValueError("logprob audit max_action_tokens must be positive")
+        if Path(filename).name != filename:
+            raise ValueError("logprob audit filename must be a basename")
         directory = Path(output_dir)
         directory.mkdir(parents=True, exist_ok=True)
-        self.path = directory / "audit_records.jsonl"
+        self.path = directory / filename
         self._stream = self.path.open("x", encoding="utf-8")
         self.max_action_tokens = max_action_tokens
         self.action_tokens = 0
