@@ -421,6 +421,12 @@ if __name__ == "__main__":
         "template; chat agents require this flag and hand the raw messages to the chat server, "
         "which renders them once with the model's own template.",
     )
+    parser.add_argument(
+        "--data.disable_thinking",
+        action="store_true",
+        default=False,
+        help="Pass enable_thinking=False to the pre-rendered HF chat template (step runners only).",
+    )
     parser.add_argument("--data.image_key", type=str, default="images", help="Dataset key for image paths/URLs")
     parser.add_argument(
         "--data.max_images_per_prompt", type=int, default=0, help="Max images per prompt for vLLM (0 = text-only)"

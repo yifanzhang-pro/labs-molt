@@ -42,6 +42,7 @@ TOOLS = [{"type": "function", "function": {"name": "py", "parameters": {}}}]
 def _template(chat, tokenize, add_generation_prompt, **kwargs):
     """Stub HF chat template: records tools, renders roles so drops are visible."""
     _template.tools = kwargs.get("tools")
+    _template.enable_thinking = kwargs.get("enable_thinking")
     return "|".join(f"{m['role']}:{m['content']}" for m in chat) + "|gen"
 
 
@@ -53,6 +54,11 @@ def test_step_prerender_keeps_system_and_tools():
     assert prompt.startswith("system:Be brief.|user:")  # system turn rendered, not dropped
     assert label == "42"
     assert _template.tools is TOOLS  # tools reach the template (Hermes preamble)
+
+
+def test_step_prerender_can_hard_disable_thinking():
+    preprocess_data(ROW, "prompt", "answer", _template, prerender=True, disable_thinking=True)
+    assert _template.enable_thinking is False
 
 
 def test_chat_passthrough_hands_full_messages_unrendered():

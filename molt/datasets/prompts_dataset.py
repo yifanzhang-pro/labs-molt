@@ -29,6 +29,7 @@ def preprocess_data(
     prerender=True,
     expand_image_placeholder: bool = False,
     tools=None,
+    disable_thinking: bool = False,
 ):
     # Verifier ground-truth answer for RL reward computation (empty if no label_key).
     label = "" if label_key is None else data[label_key]
@@ -64,6 +65,8 @@ def preprocess_data(
     # chat templates into a system-side preamble that teaches the model
     # the `<tool_call>{...}</tool_call>` emission format natively.
     kwargs = {"tools": tools} if tools else {}
+    if disable_thinking:
+        kwargs["enable_thinking"] = False
     prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True, **kwargs)
     return prompt, label
 
@@ -106,6 +109,9 @@ class PromptDataset(Dataset):
         self.image_key = getattr(self.strategy.args.data, "image_key", "images")
         apply_chat_template = getattr(self.strategy.args.data, "apply_chat_template", False)
         self.apply_chat_template = self.tokenizer.apply_chat_template if apply_chat_template else None
+        self.disable_thinking = getattr(self.strategy.args.data, "disable_thinking", False)
+        if self.disable_thinking and (not self.apply_chat_template or not self.prerender):
+            raise ValueError("--data.disable_thinking requires a pre-rendered chat template")
         self.expand_image_placeholder = should_expand_image_placeholder(self.tokenizer)
 
     def __len__(self):
@@ -124,6 +130,7 @@ class PromptDataset(Dataset):
             prerender=self.prerender,
             expand_image_placeholder=self.expand_image_placeholder,
             tools=tools,
+            disable_thinking=self.disable_thinking,
         )
         return data.get("datasource", "default"), prompt, label, data.get(self.image_key, None), tools
 
