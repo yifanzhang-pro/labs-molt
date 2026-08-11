@@ -56,6 +56,33 @@ def test_logprob_audit_writer_retains_prefix_alignment_and_versions(tmp_path):
     assert record["action_token_ids"] == [12, 13]
     assert record["rollout_actor_version"] == 4
     assert record["learner_version"] == 5
+    assert record["rollout_logprob_status"] == ["finite", "finite"]
+    assert record["learner_logprob_status"] == ["finite", "finite"]
+    assert record["support_violations"] == [False, False]
+
+
+def test_logprob_audit_writer_preserves_nonfinite_classes_and_support(tmp_path):
+    writer = LogprobAuditWriter(str(tmp_path), max_action_tokens=2, metadata={})
+    writer.write_batch(
+        torch.tensor([[1, 2, 3]]),
+        torch.tensor([[True, True]]),
+        torch.tensor([[0.0, torch.nan]]),
+        torch.tensor([[-torch.inf, torch.inf]]),
+        info={},
+        indices=None,
+        group_ids=[],
+        rollout_ids=[],
+    )
+
+    rows = [json.loads(line) for line in (tmp_path / "audit_records.jsonl").read_text().splitlines()]
+    assert rows[0]["schema_version"] == 2
+    record = rows[1]
+    assert record["schema_version"] == 2
+    assert record["rollout_log_probs"] == [None, None]
+    assert record["learner_log_probs"] == [0.0, None]
+    assert record["rollout_logprob_status"] == ["neg_inf", "pos_inf"]
+    assert record["learner_logprob_status"] == ["finite", "nan"]
+    assert record["support_violations"] == [True, False]
 
 
 def test_logprob_audit_writer_does_not_split_trajectory_at_budget(tmp_path):
