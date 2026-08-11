@@ -96,6 +96,17 @@ def _json_float(value: torch.Tensor) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _float_status(value: torch.Tensor) -> str:
+    number = float(value)
+    if math.isnan(number):
+        return "nan"
+    if number == math.inf:
+        return "pos_inf"
+    if number == -math.inf:
+        return "neg_inf"
+    return "finite"
+
+
 def _metadata_value(info: dict[str, Any], key: str, index: int) -> Any:
     value = info.get(key)
     if isinstance(value, torch.Tensor):
@@ -122,7 +133,7 @@ class LogprobAuditWriter:
         self.max_action_tokens = max_action_tokens
         self.action_tokens = 0
         self.records = 0
-        self._write({"record_type": "header", "schema_version": 1, **metadata})
+        self._write({"record_type": "header", "schema_version": 2, **metadata})
 
     def _write(self, payload: dict[str, Any]) -> None:
         self._stream.write(json.dumps(payload, sort_keys=True, allow_nan=False) + "\n")
@@ -159,7 +170,7 @@ class LogprobAuditWriter:
             token_ids = sequences[batch_index, 1:][positions]
             payload = {
                 "record_type": "trajectory",
-                "schema_version": 1,
+                "schema_version": 2,
                 "record_index": self.records,
                 "sample_index": indices[batch_index] if indices and batch_index < len(indices) else None,
                 "group_id": group_ids[batch_index] if batch_index < len(group_ids) else None,
@@ -171,6 +182,12 @@ class LogprobAuditWriter:
                 "action_token_ids": token_ids.tolist(),
                 "rollout_log_probs": [_json_float(value) for value in rollout],
                 "learner_log_probs": [_json_float(value) for value in learner],
+                "rollout_logprob_status": [_float_status(value) for value in rollout],
+                "learner_logprob_status": [_float_status(value) for value in learner],
+                "support_violations": [
+                    bool(torch.isfinite(learner_value) and torch.isneginf(rollout_value))
+                    for learner_value, rollout_value in zip(learner, rollout)
+                ],
                 "log_ratios": [_json_float(value) for value in delta],
                 "importance_ratios": [_json_float(value) for value in ratios],
             }
