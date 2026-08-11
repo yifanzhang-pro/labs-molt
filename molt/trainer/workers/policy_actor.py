@@ -38,7 +38,7 @@ from molt.trainer.fsdp.refit import gather_full_param
 from molt.utils import get_tokenizer
 from molt.utils.distributed_util import stateless_init_process_group, torch_dist_barrier_and_cuda_sync
 from molt.utils.logging_utils import init_logger
-from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics
+from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics, rank_action_token_budget
 from molt.utils.vlm_utils import merge_mm_train_inputs
 
 from ..algorithm import NaiveReplayBuffer
@@ -113,18 +113,27 @@ class PolicyTrainer:
         )
         self.logprob_audit_writer = None
         audit_dir = getattr(self.args.train, "logprob_audit_dir", None)
-        if audit_dir and torch.distributed.get_rank() == 0:
-            self.logprob_audit_writer = LogprobAuditWriter(
-                audit_dir,
-                getattr(self.args.train, "logprob_audit_max_action_tokens", 100000),
-                {
-                    "run_id": getattr(self.args.train, "logprob_audit_run_id", None),
-                    "model_name_or_path": self.args.actor.model_name_or_path,
-                    "world_size": torch.distributed.get_world_size(),
-                    "is_correction_level": self.args.algo.advantage.is_correction_level,
-                    "is_correction_mode": self.args.algo.advantage.is_correction_mode,
-                },
-            )
+        if audit_dir:
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+            total_budget = getattr(self.args.train, "logprob_audit_max_action_tokens", 100000)
+            rank_budget = rank_action_token_budget(total_budget, rank, world_size)
+            if rank_budget > 0:
+                self.logprob_audit_writer = LogprobAuditWriter(
+                    audit_dir,
+                    rank_budget,
+                    {
+                        "run_id": getattr(self.args.train, "logprob_audit_run_id", None),
+                        "model_name_or_path": self.args.actor.model_name_or_path,
+                        "rank": rank,
+                        "world_size": world_size,
+                        "total_action_token_budget": total_budget,
+                        "rank_action_token_budget": rank_budget,
+                        "is_correction_level": self.args.algo.advantage.is_correction_level,
+                        "is_correction_mode": self.args.algo.advantage.is_correction_mode,
+                    },
+                    filename=f"audit_records.rank{rank:05d}.jsonl",
+                )
 
         # Add the MoE router load-balancing aux loss only when its coefficient is set.
         self.aux_loss = self.args.actor.aux_loss_coef > 1e-8

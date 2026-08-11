@@ -6,7 +6,7 @@ import math
 
 import torch
 
-from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics
+from molt.utils.logprob_audit import LogprobAuditWriter, compute_logprob_audit_metrics, rank_action_token_budget
 
 
 def test_logprob_audit_metrics_use_only_action_tokens_and_report_raw_ratio():
@@ -100,3 +100,29 @@ def test_logprob_audit_writer_does_not_split_trajectory_at_budget(tmp_path):
 
     assert written == 0
     assert len((tmp_path / "audit_records.jsonl").read_text().splitlines()) == 1
+
+
+def test_logprob_audit_writer_supports_rank_sharded_filename(tmp_path):
+    writer = LogprobAuditWriter(
+        str(tmp_path), max_action_tokens=1, metadata={"rank": 3}, filename="audit_records.rank00003.jsonl"
+    )
+    writer.write_batch(
+        torch.tensor([[1, 2]]),
+        torch.tensor([[True]]),
+        torch.zeros(1, 1),
+        torch.zeros(1, 1),
+        info={},
+        indices=None,
+        group_ids=[],
+        rollout_ids=[],
+    )
+
+    rows = [json.loads(line) for line in (tmp_path / "audit_records.rank00003.jsonl").read_text().splitlines()]
+    assert rows[0]["rank"] == 3
+    assert rows[1]["record_type"] == "trajectory"
+
+
+def test_rank_action_token_budget_preserves_total_and_balances_remainder():
+    budgets = [rank_action_token_budget(10, rank, 4) for rank in range(4)]
+    assert budgets == [3, 3, 2, 2]
+    assert sum(budgets) == 10
