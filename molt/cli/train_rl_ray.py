@@ -876,6 +876,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--eval.top_p", type=float, default=None, help="Eval top-p; falls back to --rollout.top_p when unset."
     )
+    parser.add_argument("--eval.top_k", type=int, default=None)
+    parser.add_argument("--eval.min_p", type=float, default=None)
+    parser.add_argument("--eval.presence_penalty", type=float, default=None)
+    parser.add_argument("--eval.repetition_penalty", type=float, default=None)
     parser.add_argument(
         "--eval.max_new_tokens",
         type=int,

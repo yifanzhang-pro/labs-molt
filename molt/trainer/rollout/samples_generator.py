@@ -437,6 +437,9 @@ class SamplesGenerator:
             temperature=generate_kwargs.get("temperature", 1.0),
             top_p=generate_kwargs.get("top_p", 1.0),
             top_k=generate_kwargs.get("top_k", -1),
+            min_p=generate_kwargs.get("min_p", 0.0),
+            presence_penalty=generate_kwargs.get("presence_penalty", 0.0),
+            repetition_penalty=generate_kwargs.get("repetition_penalty", 1.0),
             max_tokens=generate_kwargs.get("max_new_tokens"),  # None = dynamic per-prompt
             min_tokens=generate_kwargs.get("min_new_tokens", 1),
             skip_special_tokens=generate_kwargs.get("skip_special_tokens", False),

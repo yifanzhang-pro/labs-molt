@@ -181,6 +181,36 @@ def test_generate_eval_samples_defaults_to_rollout_batch_size(monkeypatch):
     assert dispatch_sizes == [2, 2, 1]
 
 
+def test_eval_sampling_profile_reaches_vllm():
+    captured = {}
+
+    def run_group(prompt, label, image, sampling_params, truncate_length, n_samples, tools):
+        captured.update(vars(sampling_params))
+
+    generator = object.__new__(SamplesGenerator)
+    generator.args = SimpleNamespace(
+        algo=SimpleNamespace(advantage=SimpleNamespace(is_correction_level="off")),
+        train=SimpleNamespace(logprob_audit_dir=None),
+        rollout=SimpleNamespace(n_samples_per_prompt=1),
+    )
+    generator.agent_runners = [SimpleNamespace(run_group=SimpleNamespace(remote=run_group))]
+    generator._rr = 0
+
+    generator._dispatch_to_agent_runners(
+        ["prompt"],
+        ["answer"],
+        top_k=20,
+        min_p=0.1,
+        presence_penalty=1.5,
+        repetition_penalty=1.1,
+    )
+
+    assert captured["top_k"] == 20
+    assert captured["min_p"] == 0.1
+    assert captured["presence_penalty"] == 1.5
+    assert captured["repetition_penalty"] == 1.1
+
+
 def test_generate_samples_pool_persists_across_calls(monkeypatch):
     generator = object.__new__(SamplesGenerator)
     generator.args = SimpleNamespace(
