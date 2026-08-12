@@ -185,7 +185,12 @@ def test_eval_sampling_profile_reaches_vllm():
     captured = {}
 
     def run_group(prompt, label, image, sampling_params, truncate_length, n_samples, tools):
-        captured.update(vars(sampling_params))
+        captured.update(
+            top_k=sampling_params.top_k,
+            min_p=sampling_params.min_p,
+            presence_penalty=sampling_params.presence_penalty,
+            repetition_penalty=sampling_params.repetition_penalty,
+        )
 
     generator = object.__new__(SamplesGenerator)
     generator.args = SimpleNamespace(
