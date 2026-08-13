@@ -57,7 +57,7 @@ export AGENT_PATH="${AGENT_PATH:-/molt/examples/python/agents/math.py}"
 export MAX_AGENT_TURNS="${MAX_AGENT_TURNS:-1}"
 
 export PROMPT_DATASET="${PROMPT_DATASET:-$REPO_ROOT/.tmp/proRL_text_rl/train}"
-export EVAL_DATASET="${EVAL_DATASET:-$REPO_ROOT/.tmp/proRL_text_rl/eval}"
+export EVAL_DATASET="${EVAL_DATASET-$REPO_ROOT/.tmp/proRL_text_rl/eval}"
 export MAX_SAMPLES="${MAX_SAMPLES:-4800}"
 export ENABLE_DYNAMIC_FILTERING="${ENABLE_DYNAMIC_FILTERING:-1}"
 export EVAL_N_SAMPLES_PER_PROMPT="${EVAL_N_SAMPLES_PER_PROMPT:-1}"
