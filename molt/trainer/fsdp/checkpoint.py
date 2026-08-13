@@ -108,6 +108,18 @@ class CheckpointManager:
             shutil.move(src, dst)
         shutil.rmtree(model_dir, ignore_errors=True)
 
+        index_path = os.path.join(output_dir, "model.safetensors.index.json")
+        if os.path.isfile(index_path):
+            with open(index_path) as f:
+                index = json.load(f)
+            weight_map = index.get("weight_map", {})
+            filtered = {name: shard for name, shard in weight_map.items() if not name.endswith("_extra_state")}
+            if len(filtered) != len(weight_map):
+                # Transformer Engine bookkeeping is not a model weight, and vLLM
+                # rejects it as an unknown parameter. Keep its shard bytes unindexed.
+                index["weight_map"] = filtered
+                CheckpointManager._atomic_write_json(index_path, index)
+
     def _build_checkpointer(self, output_dir: str, save_consolidated: bool, model: nn.Module | None = None):
         from nemo_automodel.components.checkpoint.checkpointing import Checkpointer, CheckpointingConfig
 

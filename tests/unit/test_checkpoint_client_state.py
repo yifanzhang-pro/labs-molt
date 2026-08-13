@@ -142,3 +142,29 @@ def test_metric_round_trip(tmp_path):
     with open(cm._get_ckpt_metric_path(str(tmp_path))) as f:
         payload = json.load(f)
     assert abs(payload["metric_value"] - 0.25) < 1e-6
+
+
+def test_hf_export_drops_transformer_engine_extra_state_from_index(tmp_path):
+    export_dir = tmp_path / "model" / "consolidated"
+    export_dir.mkdir(parents=True)
+    index_path = export_dir / "model.safetensors.index.json"
+    index_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"total_size": 42},
+                "weight_map": {
+                    "model.layers.0.weight": "model.safetensors",
+                    "model.layers.0._extra_state": "model.safetensors",
+                },
+            }
+        )
+    )
+    (export_dir / "model.safetensors").write_text("weights")
+
+    _cm()._promote_hf_export(str(tmp_path))
+
+    with open(tmp_path / "model.safetensors.index.json") as f:
+        index = json.load(f)
+    assert index["weight_map"] == {"model.layers.0.weight": "model.safetensors"}
+    assert (tmp_path / "model.safetensors").read_text() == "weights"
+    assert not (tmp_path / "model").exists()
