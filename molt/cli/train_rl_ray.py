@@ -74,11 +74,11 @@ def train(args):
     # spread first, they fragment every node and the vLLM placement group can
     # remain pending forever.
     vllm_engines = None
-    # data.max_len is the shared total-context budget (prompt + generation),
-    # so vLLM's max_model_len reads it directly. For VLM (image-tokenized
-    # prompts) or multi-turn agents, set --data.max_len high enough to fit
-    # the longest expanded prompt plus rollout.max_new_tokens.
+    # Training keeps its own total-context budget. Evaluation may request a
+    # larger context without padding or sharding learner-side train sequences
+    # to that length; vLLM must accommodate the larger of the two budgets.
     max_len = args.data.max_len
+    vllm_max_len = max(max_len, args.eval.max_len or 0)
     capture_rollout_logprobs = args.algo.advantage.is_correction_level != "off" or bool(
         args.train.logprob_audit_dir
     )
@@ -90,7 +90,7 @@ def train(args):
             args.train.seed,
             args.train.full_determinism_enable,
             args.vllm.enforce_eager,
-            max_len,
+            vllm_max_len,
             args.vllm.gpu_memory_utilization,
             "processed_logprobs" if capture_rollout_logprobs else None,
             max_images_per_prompt=getattr(args.data, "max_images_per_prompt", 0),
@@ -868,6 +868,12 @@ if __name__ == "__main__":
     parser.add_argument("--eval.split", type=str, default="train")
     parser.add_argument("--eval.steps", type=int, default=-1, help="Evaluate every N steps; -1 disables eval.")
     parser.add_argument(
+        "--eval.thinking_mode",
+        choices=["inherit", "enabled", "disabled"],
+        default="inherit",
+        help="Eval chat-template thinking mode. 'inherit' follows --data.disable_thinking.",
+    )
+    parser.add_argument(
         "--eval.temperature",
         type=float,
         default=None,
@@ -880,6 +886,12 @@ if __name__ == "__main__":
     parser.add_argument("--eval.min_p", type=float, default=None)
     parser.add_argument("--eval.presence_penalty", type=float, default=None)
     parser.add_argument("--eval.repetition_penalty", type=float, default=None)
+    parser.add_argument(
+        "--eval.max_len",
+        type=int,
+        default=None,
+        help="Eval total context length; falls back to --data.max_len when unset.",
+    )
     parser.add_argument(
         "--eval.max_new_tokens",
         type=int,
@@ -1122,6 +1134,8 @@ if __name__ == "__main__":
 
     if args.eval.batch_size is not None and args.eval.batch_size <= 0:
         raise ValueError(f"--eval.batch_size must be greater than zero, got {args.eval.batch_size}.")
+    if args.eval.max_len is not None and args.eval.max_len <= 0:
+        raise ValueError(f"--eval.max_len must be greater than zero, got {args.eval.max_len}.")
 
     # --- Runtime ---
     if args.use_ms:

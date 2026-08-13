@@ -87,15 +87,20 @@ class _Tok:
     image_token = "<image>"  # literal branch: no structured split
 
 
-def _dataset(rows, prerender):
+def _dataset(rows, prerender, *, data_disable_thinking=False, disable_thinking=None):
     strategy = SimpleNamespace(
         args=SimpleNamespace(
             data=SimpleNamespace(
-                input_key="prompt", label_key="answer", tools_key="tools", image_key="images", apply_chat_template=True
+                input_key="prompt",
+                label_key="answer",
+                tools_key="tools",
+                image_key="images",
+                apply_chat_template=True,
+                disable_thinking=data_disable_thinking,
             )
         )
     )
-    return PromptDataset(rows, _Tok(), strategy, prerender=prerender)
+    return PromptDataset(rows, _Tok(), strategy, prerender=prerender, disable_thinking=disable_thinking)
 
 
 def test_dataset_row_is_five_tuple_and_collate_matches():
@@ -105,6 +110,14 @@ def test_dataset_row_is_five_tuple_and_collate_matches():
     assert len(item) == 5  # (datasource, prompt, label, images, tools) — dispatch chain contract
     datasources, prompts, labels, images, tools = ds.collate_fn([item])
     assert prompts == [ROW["prompt"]] and images == [["a.png"]] and tools == [TOOLS]
+
+
+def test_dataset_can_enable_thinking_when_training_disables_it():
+    ds = _dataset([ROW], prerender=True, data_disable_thinking=True, disable_thinking=False)
+
+    ds[0]
+
+    assert _template.enable_thinking is None
 
 
 # ------------------------------ _wire_messages -------------------------------
@@ -153,3 +166,24 @@ def test_eval_metrics_maps_chat_list_prompts_to_datasource():
     )
     metrics = compute_eval_metrics(eval_dataloader, [sample], n_samples_per_prompt=1)
     assert metrics["eval_geo3k_pass1"] == 1.0  # datasource resolved via the last user turn text
+
+
+def test_eval_metrics_exposes_avg32_as_mean_sample_reward():
+    eval_dataloader = [(["aime"], ["problem"], ["42"], [None], [None])]
+    samples = [
+        SimpleNamespace(
+            prompts=["problem"],
+            group_ids=["g1"],
+            rewards=[float(index < 8)],
+            response_length=[7],
+            truncated=[False],
+        )
+        for index in range(32)
+    ]
+
+    metrics = compute_eval_metrics(eval_dataloader, samples, n_samples_per_prompt=32)
+
+    assert metrics["eval_aime_avg32"] == 0.25
+    assert metrics["eval_aime_pass1"] == 0.25
+    assert metrics["eval_aime_pass32"] == 1.0
+    assert metrics["eval_num_samples"] == 32.0

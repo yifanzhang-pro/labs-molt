@@ -95,7 +95,16 @@ def prepare_datasets(strategy, tokenizer):
         # Eval uses the FULL eval set (no subsampling). --data.max_samples is the
         # TRAIN subsample knob; applying it here silently truncated eval too, so a
         # small --data.max_samples debug run distorted pass@k. Keep them decoupled.
-        eval_dataset = PromptDataset(eval_data, tokenizer, strategy, prerender=prerender)
+        eval_disable_thinking = None
+        if args.eval.thinking_mode != "inherit":
+            eval_disable_thinking = args.eval.thinking_mode == "disabled"
+        eval_dataset = PromptDataset(
+            eval_data,
+            tokenizer,
+            strategy,
+            prerender=prerender,
+            disable_thinking=eval_disable_thinking,
+        )
         eval_dataloader = strategy.setup_dataloader(
             eval_dataset,
             batch_size=1,
@@ -230,6 +239,10 @@ def compute_eval_metrics(eval_dataloader, samples_list, n_samples_per_prompt):
     for ds, m in metrics.items():
         logs[f"eval_{ds}_pass{n_samples_per_prompt}"] = m[f"pass{n_samples_per_prompt}"] / m["count"]
         logs[f"eval_{ds}_pass1"] = m["pass1"] / m["count"]
+        if n_samples_per_prompt > 1:
+            # Explicit alias for the mean of n sampled rewards. Keep pass1 for
+            # backward compatibility with existing dashboards and summaries.
+            logs[f"eval_{ds}_avg{n_samples_per_prompt}"] = logs[f"eval_{ds}_pass1"]
         if m["lengths"]:
             logs[f"eval_{ds}_response_length_mean"] = sum(m["lengths"]) / len(m["lengths"])
             total_lengths.extend(m["lengths"])
@@ -827,6 +840,7 @@ class GenerateSamplesActor:
             "min_p",
             "presence_penalty",
             "repetition_penalty",
+            "max_len",
             "max_new_tokens",
         ):
             override = getattr(self.args.eval, key)

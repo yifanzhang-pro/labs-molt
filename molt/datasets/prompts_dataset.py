@@ -90,6 +90,7 @@ class PromptDataset(Dataset):
         tokenizer,
         strategy,
         prerender=True,
+        disable_thinking=None,
     ) -> None:
         super().__init__()
         self.strategy = strategy
@@ -109,7 +110,8 @@ class PromptDataset(Dataset):
         self.image_key = getattr(self.strategy.args.data, "image_key", "images")
         apply_chat_template = getattr(self.strategy.args.data, "apply_chat_template", False)
         self.apply_chat_template = self.tokenizer.apply_chat_template if apply_chat_template else None
-        self.disable_thinking = getattr(self.strategy.args.data, "disable_thinking", False)
+        configured_disable_thinking = getattr(self.strategy.args.data, "disable_thinking", False)
+        self.disable_thinking = configured_disable_thinking if disable_thinking is None else disable_thinking
         if self.disable_thinking and (not self.apply_chat_template or not self.prerender):
             raise ValueError("--data.disable_thinking requires a pre-rendered chat template")
         self.expand_image_placeholder = should_expand_image_placeholder(self.tokenizer)
