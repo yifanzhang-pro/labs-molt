@@ -17,6 +17,9 @@ def _sample(rollout_ids, group_ids, rewards):
         rollout_ids=rollout_ids,
         group_ids=group_ids,
         index=list(range(len(rewards))),
+        prompts=[f"prompt-{group_id}" for group_id in group_ids],
+        response_length=torch.ones(len(rewards)),
+        truncated=torch.zeros(len(rewards)),
     )
 
 
@@ -29,16 +32,20 @@ def test_long_failures_do_not_outweigh_short_successes():
     ]
     assert torch.cat([s.info["reward"] for s in samples]).mean().item() == pytest.approx(0.25)
 
-    per_rollout, per_group = _collect_rollout_rewards(samples)
+    per_rollout, per_group, prompt_hashes, diagnostics = _collect_rollout_rewards(samples)
     assert per_rollout == [1.0, 0.0, 1.0, 0.0]
     assert per_group == [0.5, 0.5]
+    assert len(prompt_hashes) == 2
+    assert len(diagnostics) == 4
 
 
 def test_a_rollout_split_across_samples_is_counted_once():
     samples = [_sample(["A"], ["g0"], [1.0]), _sample(["A", "B"], ["g0", "g0"], [1.0, 0.0])]
-    per_rollout, per_group = _collect_rollout_rewards(samples)
+    per_rollout, per_group, prompt_hashes, diagnostics = _collect_rollout_rewards(samples)
     assert per_rollout == [1.0, 0.0]
     assert per_group == [0.5]
+    assert len(prompt_hashes) == 1
+    assert diagnostics[0]["response_length"] == 2.0
 
 
 def test_single_turn_legacy_path_is_an_identity():
@@ -48,20 +55,29 @@ def test_single_turn_legacy_path_is_an_identity():
         rollout_ids=None,
         group_ids=None,
         index=[0, 1, 2, 3],
+        prompts=["p0", "p1", "p2", "p3"],
+        response_length=torch.ones(4),
+        truncated=torch.zeros(4),
     )
-    per_rollout, per_group = _collect_rollout_rewards([sample])
+    per_rollout, per_group, prompt_hashes, diagnostics = _collect_rollout_rewards([sample])
     assert per_rollout == [1.0, 0.0, 1.0, 0.0]
     assert per_group == [1.0, 0.0, 1.0, 0.0]
+    assert len(prompt_hashes) == 4
+    assert len(diagnostics) == 4
 
 
 def test_samples_without_a_reward_are_skipped():
     ok = _sample(["A"], ["g0"], [1.0])
-    missing = types.SimpleNamespace(info={}, rollout_ids=["B"], group_ids=["g1"], index=[0])
-    assert _collect_rollout_rewards([ok, missing]) == ([1.0], [1.0])
+    missing = types.SimpleNamespace(info={}, rollout_ids=["B"], group_ids=["g1"], index=[0], prompts=["prompt-g1"])
+    per_rollout, per_group, prompt_hashes, diagnostics = _collect_rollout_rewards([ok, missing])
+    assert per_rollout == [1.0]
+    assert per_group == [1.0]
+    assert len(prompt_hashes) == 1
+    assert len(diagnostics) == 1
 
 
 def test_empty_input():
-    assert _collect_rollout_rewards([]) == ([], [])
+    assert _collect_rollout_rewards([]) == ([], [], [], [])
 
 
 def test_id_length_mismatch_is_not_silently_truncated():

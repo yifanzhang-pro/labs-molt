@@ -14,6 +14,8 @@
 # limitations under the License.
 
 import asyncio
+import hashlib
+import json
 import os
 import statistics
 import time
@@ -143,22 +145,53 @@ def _collect_rollout_rewards(rollout_samples):
     zero-reward ones. On an OSWorld run this read 0.28 where the same checkpoint scored 0.4487 on
     the same tasks through the eval path, which groups before averaging.
 
-    Returns (one reward per rollout, one mean reward per prompt group).
+    Returns rewards by rollout and group, stable prompt hashes, and per-rollout
+    outcome diagnostics.
     """
     reward_of_rollout: dict = {}  # every row of a rollout carries the same terminal reward
     rewards_in_group: dict = {}
+    prompt_hash_of_group: dict = {}
+    diagnostics_of_rollout: dict = {}
     for sample in rollout_samples:
         if "reward" not in sample.info:
             continue
         rollout_ids, group_ids = rollout_and_group_ids(sample)
         sample_rewards = sample.info["reward"].flatten().tolist()
-        for rollout_id, group_id, reward in zip(rollout_ids, group_ids, sample_rewards, strict=True):
+        response_lengths = sample.response_length.flatten().tolist()
+        truncated = sample.truncated.flatten().tolist()
+        for rollout_id, group_id, reward, prompt, response_length, was_truncated in zip(
+            rollout_ids,
+            group_ids,
+            sample_rewards,
+            sample.prompts,
+            response_lengths,
+            truncated,
+            strict=True,
+        ):
+            prompt_text = prompt if isinstance(prompt, str) else json.dumps(prompt, sort_keys=True)
+            prompt_hash = hashlib.sha256(prompt_text.encode()).hexdigest()
+            previous_hash = prompt_hash_of_group.setdefault(group_id, prompt_hash)
+            if previous_hash != prompt_hash:
+                raise ValueError(f"prompt group {group_id!r} contains different prompts")
             if rollout_id not in reward_of_rollout:
                 reward_of_rollout[rollout_id] = reward
                 rewards_in_group.setdefault(group_id, []).append(reward)
+                diagnostics_of_rollout[rollout_id] = {
+                    "prompt_sha256": prompt_hash,
+                    "reward": reward,
+                    "response_length": response_length,
+                    "truncated": was_truncated,
+                }
+            else:
+                diagnostics_of_rollout[rollout_id]["response_length"] += response_length
+                diagnostics_of_rollout[rollout_id]["truncated"] = max(
+                    diagnostics_of_rollout[rollout_id]["truncated"], was_truncated
+                )
     return (
         list(reward_of_rollout.values()),
         [statistics.fmean(rewards) for rewards in rewards_in_group.values()],
+        list(prompt_hash_of_group.values()),
+        list(diagnostics_of_rollout.values()),
     )
 
 
@@ -211,6 +244,7 @@ def compute_eval_metrics(eval_dataloader, samples_list, n_samples_per_prompt):
         grouped[key]["truncated"].append(_first_scalar(s.truncated))
 
     metrics = {}
+    sample_diagnostics = []
     for key in group_order:
         g = grouped[key]
         prompt = group_prompt[key]
@@ -218,6 +252,16 @@ def compute_eval_metrics(eval_dataloader, samples_list, n_samples_per_prompt):
         if not rewards:
             continue
         ds = prompt_to_datasource.get(prompt, "unknown")
+        prompt_text = prompt if isinstance(prompt, str) else json.dumps(prompt, sort_keys=True)
+        sample_diagnostics.append(
+            {
+                "datasource": ds,
+                "prompt_sha256": hashlib.sha256(prompt_text.encode()).hexdigest(),
+                "rewards": rewards,
+                "response_lengths": [value for value in g["lengths"] if value is not None],
+                "truncated": [value for value in g["truncated"] if value is not None],
+            }
+        )
         if ds not in metrics:
             metrics[ds] = {
                 f"pass{n_samples_per_prompt}": 0.0,
@@ -255,6 +299,8 @@ def compute_eval_metrics(eval_dataloader, samples_list, n_samples_per_prompt):
     if total_truncated:
         logs["eval_truncated_rate"] = sum(total_truncated) / len(total_truncated)
     logs["eval_num_samples"] = float(len(samples_list))
+    sample_diagnostics.sort(key=lambda record: (record["datasource"], record["prompt_sha256"]))
+    logger.info(f"Eval sample diagnostics: {sample_diagnostics}")
 
     return logs
 
@@ -374,7 +420,9 @@ class BaseRLTrainer:
         # Ground-truth rollout stats over the FULL generated set — from the lightweight fields present
         # on every rollout sample, and computed on `rollout_samples` (before balance_experiences drops
         # the trailing remainder), so num_samples and the means reflect everything we generated.
-        per_rollout, per_group = _collect_rollout_rewards(rollout_samples)
+        per_rollout, per_group, prompt_hashes, sample_diagnostics = _collect_rollout_rewards(rollout_samples)
+        logger.info(f"Rollout exposure at step {global_step + 1}: {{'prompt_sha256': {prompt_hashes}}}")
+        logger.info(f"Rollout sample diagnostics at step {global_step + 1}: {{'samples': {sample_diagnostics}}}")
         response_lengths = torch.cat([s.response_length for s in rollout_samples if s.response_length is not None])
         truncated = torch.cat([s.truncated for s in rollout_samples if s.truncated is not None])
         num_turn_rows = sum(s.info["reward"].numel() for s in rollout_samples if "reward" in s.info)
