@@ -113,11 +113,31 @@ class CheckpointManager:
             with open(index_path) as f:
                 index = json.load(f)
             weight_map = index.get("weight_map", {})
-            filtered = {name: shard for name, shard in weight_map.items() if not name.endswith("_extra_state")}
-            if len(filtered) != len(weight_map):
+            extra_names = {name for name in weight_map if name.endswith("_extra_state")}
+            if extra_names:
+                from safetensors import safe_open
+                from safetensors.torch import save_file
+
+                removed_bytes = 0
+                for shard in {weight_map[name] for name in extra_names}:
+                    shard_path = os.path.join(output_dir, shard)
+                    tmp_path = f"{shard_path}.tmp.{os.getpid()}"
+                    with safe_open(shard_path, framework="pt", device="cpu") as reader:
+                        tensors = {}
+                        for name in reader.keys():
+                            tensor = reader.get_tensor(name)
+                            if name.endswith("_extra_state"):
+                                removed_bytes += tensor.numel() * tensor.element_size()
+                            else:
+                                tensors[name] = tensor
+                        save_file(tensors, tmp_path, metadata=reader.metadata())
+                    os.replace(tmp_path, shard_path)
+
                 # Transformer Engine bookkeeping is not a model weight, and vLLM
-                # rejects it as an unknown parameter. Keep its shard bytes unindexed.
-                index["weight_map"] = filtered
+                # scans shard contents and rejects it as an unknown parameter.
+                index["weight_map"] = {name: shard for name, shard in weight_map.items() if name not in extra_names}
+                if isinstance(index.get("metadata", {}).get("total_size"), int):
+                    index["metadata"]["total_size"] -= removed_bytes
                 CheckpointManager._atomic_write_json(index_path, index)
 
     def _build_checkpointer(self, output_dir: str, save_consolidated: bool, model: nn.Module | None = None):

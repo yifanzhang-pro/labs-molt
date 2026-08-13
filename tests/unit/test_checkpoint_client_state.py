@@ -31,6 +31,8 @@ import json
 import os
 
 import torch
+from safetensors import safe_open
+from safetensors.torch import save_file
 
 from molt.trainer.fsdp.checkpoint import CheckpointManager
 
@@ -148,10 +150,17 @@ def test_hf_export_drops_transformer_engine_extra_state_from_index(tmp_path):
     export_dir = tmp_path / "model" / "consolidated"
     export_dir.mkdir(parents=True)
     index_path = export_dir / "model.safetensors.index.json"
+    save_file(
+        {
+            "model.layers.0.weight": torch.ones(1),
+            "model.layers.0._extra_state": torch.ones(2, dtype=torch.uint8),
+        },
+        export_dir / "model.safetensors",
+    )
     index_path.write_text(
         json.dumps(
             {
-                "metadata": {"total_size": 42},
+                "metadata": {"total_size": 6},
                 "weight_map": {
                     "model.layers.0.weight": "model.safetensors",
                     "model.layers.0._extra_state": "model.safetensors",
@@ -159,12 +168,13 @@ def test_hf_export_drops_transformer_engine_extra_state_from_index(tmp_path):
             }
         )
     )
-    (export_dir / "model.safetensors").write_text("weights")
 
     _cm()._promote_hf_export(str(tmp_path))
 
     with open(tmp_path / "model.safetensors.index.json") as f:
         index = json.load(f)
     assert index["weight_map"] == {"model.layers.0.weight": "model.safetensors"}
-    assert (tmp_path / "model.safetensors").read_text() == "weights"
+    assert index["metadata"]["total_size"] == 4
+    with safe_open(tmp_path / "model.safetensors", framework="pt") as reader:
+        assert list(reader.keys()) == ["model.layers.0.weight"]
     assert not (tmp_path / "model").exists()
