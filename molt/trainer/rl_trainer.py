@@ -1053,8 +1053,7 @@ class RLTrainer:
 
         self.rollout_queue = Queue(maxsize=queue_size)
         self.rollout_slots = Queue(maxsize=queue_size)
-        for _ in range(queue_size):
-            self.rollout_slots.put(0, block=True)
+        self.rollout_slot_count = queue_size
 
         vllm_lock = VLLMLock.remote()
 
@@ -1096,6 +1095,10 @@ class RLTrainer:
         start_episode = checkpoint_states.get("episode", 0)
         global_step = checkpoint_states.get("global_step", 0)
         total_consumed_prompts = checkpoint_states.get("total_consumed_prompts", 0)
+        # Seed only after restore so the first resumed rollout carries the
+        # checkpoint's actor version instead of the fresh-run default zero.
+        for _ in range(self.rollout_slot_count):
+            self.rollout_slots.put(global_step, block=True)
         if global_step > 0:
             ray.get(
                 [
