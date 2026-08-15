@@ -237,6 +237,32 @@ def test_generate_samples_pool_persists_across_calls(monkeypatch):
     assert [handle.group_id for handle in generator._inflight_rollouts] == ["p6", "p7", "p8", "p9"]
 
 
+def test_force_sync_generate_samples_drains_pool_at_batch_boundary(monkeypatch):
+    generator = object.__new__(SamplesGenerator)
+    generator.args = SimpleNamespace(
+        rollout=SimpleNamespace(batch_size=3, n_samples_per_prompt=1, vllm_generate_batch_size=5),
+        algo=SimpleNamespace(dynamic_filtering_enable=False),
+        ckpt=SimpleNamespace(warm_resume_rollouts=False),
+        train=SimpleNamespace(force_sync_mode=True),
+    )
+    generator.prompts_dataloader = _prompt_loader(6)
+    _wire_fake_vllm(generator, monkeypatch, _sample)
+
+    first, _, first_dispatched, first_exhausted = generator.generate_samples()
+
+    assert [sample.group_ids[0] for sample in first] == ["p0", "p1", "p2"]
+    assert first_dispatched == 3
+    assert first_exhausted is False
+    assert generator._inflight_rollouts == []
+
+    second, _, second_dispatched, second_exhausted = generator.generate_samples()
+
+    assert [sample.group_ids[0] for sample in second] == ["p3", "p4", "p5"]
+    assert second_dispatched == 3
+    assert second_exhausted is True
+    assert generator._inflight_rollouts == []
+
+
 def test_generator_keeps_no_checkpoint_state_and_resumes_from_dataloader(monkeypatch):
     """The in-flight pool is intentionally NOT persisted.
 

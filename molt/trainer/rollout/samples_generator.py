@@ -210,6 +210,7 @@ class SamplesGenerator:
         groups_per_batch = self.args.rollout.batch_size
         inflight_capacity = getattr(self.args.rollout, "vllm_generate_batch_size", None) or groups_per_batch
         dynamic_filtering = self.args.algo.dynamic_filtering_enable
+        force_sync = getattr(getattr(self.args, "train", None), "force_sync_mode", False)
 
         def finished_group_count() -> int:
             return len({_sample_group_key(sample) for sample in self._finished_samples})
@@ -226,6 +227,12 @@ class SamplesGenerator:
         while finished_group_count() < groups_per_batch:
             # Refill so the runner pool keeps `inflight_capacity` rollouts in flight (engines stay saturated).
             free_slots = inflight_capacity - len(self._inflight_rollouts)
+            if force_sync:
+                # Strict-sync batches cannot carry prefetched groups across a refit or checkpoint:
+                # the dataloader cursor advances past them, so a resume would skip those prompts.
+                # Keep within-batch concurrency but drain the pool at the boundary.
+                groups_needed = groups_per_batch - finished_group_count() - len(self._inflight_rollouts)
+                free_slots = min(free_slots, max(groups_needed, 0))
             if free_slots > 0 and self._dataloader_iter is not None:
                 prompts, labels, images, tools, dataloader_exhausted = _collect_prompt_batch(
                     self._dataloader_iter, free_slots
