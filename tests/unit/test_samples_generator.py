@@ -259,8 +259,17 @@ def test_force_sync_generate_samples_drains_pool_at_batch_boundary(monkeypatch):
 
     assert [sample.group_ids[0] for sample in second] == ["p3", "p4", "p5"]
     assert second_dispatched == 3
-    assert second_exhausted is True
+    # Exact-size collection does not peek past the final item, so exhaustion is
+    # observed only on the next call. The strict-sync invariant here is that no
+    # prompt was prefetched across either batch boundary.
+    assert second_exhausted is False
     assert generator._inflight_rollouts == []
+
+    third, _, third_dispatched, third_exhausted = generator.generate_samples()
+
+    assert third == []
+    assert third_dispatched == 0
+    assert third_exhausted is True
 
 
 def test_generator_keeps_no_checkpoint_state_and_resumes_from_dataloader(monkeypatch):
