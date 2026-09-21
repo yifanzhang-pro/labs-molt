@@ -2,7 +2,7 @@
 
 This fork's `feat/klpo-all-kl` branch supports KLPO **token regression** and
 **sequence regression**, each with Monte Carlo KL (MC-KL), Top-K Aggregated KL
-(TK-KL), Binary KL, or Full KL. Install the [KLPO package](https://github.com/yifanzhang-pro/KLPO)
+(TopK-KL), Binary KL, or Full KL. Install the [KLPO package](https://github.com/yifanzhang-pro/KLPO)
 alongside Molt. The backend calls `klpo.molt.KLPOLoss`; the mathematical formulas
 have one implementation in KLPO.
 
@@ -15,19 +15,19 @@ python /path/to/KLPO/scripts/train_molt.py \
   --train-data /path/to/train --eval-data /path/to/eval \
   --route token --kl-estimator mc --mc-samples 128
 # Other choices: --route sequence; --kl-estimator binary|full;
-# --kl-estimator tk --top-k 128
+# --kl-estimator topk --top-k 128
 ```
 
 Native CLI flags are `--actor.loss_mode klpo`, `--actor.klpo_route`,
 `--actor.klpo_kl_estimator`, `--actor.klpo_beta`, `--actor.klpo_top_k`,
 `--actor.klpo_mc_samples`, and `--actor.klpo_tail_floor`. The launcher supplies the
 required synchronous single-update schedule and raw-reward configuration.
-`molt.KLPO_API_VERSION = 1` identifies this interface.
+`molt.KLPO_API_VERSION = 2` identifies this interface and its `topk` estimator name.
 
 | Estimator | Generation-time records | Trainer scoring |
 | --- | --- | --- |
 | MC-KL (default) | M independent q draws with replacement and log q | Same IDs, duplicates preserved |
-| TK-KL | Sampler's top K IDs and original log q | Same IDs, plus an aggregated tail |
+| TopK-KL | Sampler's top K IDs and original log q | Same IDs, plus an aggregated tail |
 | Binary KL | Realized action log q | Realized action log p |
 | Full KL | Full conditional log q in vocabulary order | Full conditional log p |
 
@@ -38,7 +38,7 @@ loss can be negative and are not clamped.
 
 The `/molt/v1/generate` endpoint reads vLLM's processed generation logprobs and
 returns exact token IDs with compact NumPy records. MC uses a separate RNG from
-response generation; auxiliary draws never execute an action or tool. TK never
+response generation; auxiliary draws never execute an action or tool. TopK-KL never
 renormalizes the head or inserts an action outside it; K >= V takes the full-KL
 limit. Full/MC capture currently requests all vocabulary logprobs inside the
 engine, reducing MC to M records before HTTP transfer. Thus MC reduces network

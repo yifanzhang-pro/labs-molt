@@ -459,8 +459,8 @@ class PolicyTrainer:
             estimator = self.args.actor.klpo_kl_estimator
             if estimator != "binary" and experience.kl_log_probs is None:
                 raise ValueError("KLPO requires generation-time conditional probability records")
-            if estimator in {"tk", "mc"} and experience.kl_token_ids is None:
-                raise ValueError("KLPO TK/MC requires stored sampler token IDs")
+            if estimator in {"topk", "mc"} and experience.kl_token_ids is None:
+                raise ValueError("KLPO TopK/MC requires stored sampler token IDs")
             kl_forward = {"kl_token_ids": experience.kl_token_ids, "return_full_log_probs": estimator == "full"}
         model_output = self.actor(
             sequences,
@@ -517,7 +517,7 @@ class PolicyTrainer:
                 "behavior_kl_log_probs": (
                     experience.kl_log_probs.transpose(1, 2) if experience.kl_log_probs is not None else None
                 ),
-                "full_vocabulary": estimator in {"tk", "full"} and model_output.get("kl_full_vocabulary", False),
+                "full_vocabulary": estimator in {"topk", "full"} and model_output.get("kl_full_vocabulary", False),
             }
         actor_loss, reported_actor_loss, clip_ratio, policy_kl, vllm_kl, is_filter_ratio = self.actor_loss_fn(
             action_log_probs,

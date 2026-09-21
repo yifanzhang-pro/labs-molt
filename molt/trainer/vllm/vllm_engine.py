@@ -185,7 +185,7 @@ class RolloutRayActor:
     async def generate_kl(self, body: dict) -> dict:
         """Capture KL conditionals from the same processed logits that generated each action.
 
-        TK records keep the sampler head; MC draws use a separate CPU RNG and keep duplicates.
+        TopK-KL records keep the sampler head; MC draws use a separate CPU RNG and keep duplicates.
         Full/MC request the vocabulary internally, reducing MC records before HTTP transport.
         """
         import base64
@@ -199,7 +199,7 @@ class RolloutRayActor:
             raise RuntimeError("Native KL capture requires an engine configured with processed_logprobs")
         config = body["kl"]
         estimator = config["estimator"]
-        if estimator not in {"binary", "tk", "mc", "full"}:
+        if estimator not in {"binary", "topk", "mc", "full"}:
             raise ValueError("Unknown KL estimator")
         params = dict(body["sampling_params"])
         if (
@@ -218,7 +218,7 @@ class RolloutRayActor:
         k, m = min(int(config["top_k"]), vocab_size), int(config["mc_samples"])
         if k < 1 or m < 1:
             raise ValueError("KL K and M must be positive")
-        params["logprobs"] = {"binary": 0, "tk": k, "mc": -1, "full": -1}[estimator]
+        params["logprobs"] = {"binary": 0, "topk": k, "mc": -1, "full": -1}[estimator]
         params["output_kind"] = RequestOutputKind.DELTA
         params["detokenize"] = False
         prompt = {"prompt_token_ids": body["token_ids"]}
@@ -263,10 +263,10 @@ class RolloutRayActor:
                     action_logps.append(float(entries[token].logprob))
                     if estimator == "binary":
                         continue
-                    if estimator == "tk":
+                    if estimator == "topk":
                         head = sorted(entries, key=lambda v: (-entries[v].logprob, v))[:k]
                         if len(head) != k:
-                            raise RuntimeError("Sampler did not return the requested TK head")
+                            raise RuntimeError("Sampler did not return the requested TopK-KL head")
                         values = [entries[v].logprob for v in head]
                         record_ids.append(head)
                     else:

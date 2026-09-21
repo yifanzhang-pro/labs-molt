@@ -132,8 +132,8 @@ def _inference_sampling_params(sp) -> dict:
     # ALWAYS send top_k: when omitted the server silently falls back to the model's
     # generation_config (Qwen ships top_k=20), diverging sampling from the training
     # config AND renormalizing returned logprobs over the truncated support.
-    tk = getattr(sp, "top_k", -1)
-    fields["top_k"] = tk if tk not in (0, None) else -1
+    topk = getattr(sp, "top_k", -1)
+    fields["top_k"] = topk if topk not in (0, None) else -1
     if getattr(sp, "min_tokens", 0):
         fields["min_tokens"] = sp.min_tokens
     if getattr(sp, "seed", None) is not None:

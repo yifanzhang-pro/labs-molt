@@ -53,7 +53,7 @@ def engine(monkeypatch):
     return cls.generate_kl, stub, probs, actions, calls
 
 
-@pytest.mark.parametrize("estimator", ["binary", "tk", "mc", "full"])
+@pytest.mark.parametrize("estimator", ["binary", "topk", "mc", "full"])
 def test_sampler_transport_and_replay_preserve_conditionals(engine, estimator):
     generate_kl, engine_stub, probs, actions, calls = engine
     config = {"estimator": estimator, "top_k": 2, "mc_samples": 17, "temperature": 0.7}
@@ -76,7 +76,7 @@ def test_sampler_transport_and_replay_preserve_conditionals(engine, estimator):
         return
     q = gen.kl_log_probs
     ids = getattr(gen, "kl_token_ids", None)
-    if estimator == "tk":
+    if estimator == "topk":
         np.testing.assert_array_equal(ids, [[0, 1], [3, 2]])
     elif estimator == "mc":
         assert ids.shape == (2, 17) and np.unique(ids[0]).size < 17
@@ -181,7 +181,7 @@ def test_multi_id_scoring_keeps_duplicate_gradients_and_temperature():
 
 
 @pytest.mark.parametrize("route", ["sequence", "token"])
-@pytest.mark.parametrize("estimator", ["binary", "tk", "mc", "full"])
+@pytest.mark.parametrize("estimator", ["binary", "topk", "mc", "full"])
 def test_native_cli_accepts_all_routes(monkeypatch, route, estimator):
     import ast
     from pathlib import Path
