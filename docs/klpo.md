@@ -1,8 +1,8 @@
 # Native KLPO interface
 
-This fork's `feat/klpo-all-kl` branch supports KLPO **sequence regression** and
-**token regression**, each with Binary KL, Top-K Aggregated KL (TK-KL), Monte Carlo
-KL (MC-KL), or Full KL. Install the [KLPO package](https://github.com/yifanzhang-pro/KLPO)
+This fork's `feat/klpo-all-kl` branch supports KLPO **token regression** and
+**sequence regression**, each with Monte Carlo KL (MC-KL), Top-K Aggregated KL
+(TK-KL), Binary KL, or Full KL. Install the [KLPO package](https://github.com/yifanzhang-pro/KLPO)
 alongside Molt. The backend calls `klpo.molt.KLPOLoss`; the mathematical formulas
 have one implementation in KLPO.
 
@@ -26,13 +26,13 @@ required synchronous single-update schedule and raw-reward configuration.
 
 | Estimator | Generation-time records | Trainer scoring |
 | --- | --- | --- |
-| Binary | Realized action log q | Realized action log p |
-| TK | Sampler's top K IDs and original log q | Same IDs, plus an aggregated tail |
-| MC | M independent q draws with replacement and log q | Same IDs, duplicates preserved |
-| Full | Full conditional log q in vocabulary order | Full conditional log p |
+| MC-KL (default) | M independent q draws with replacement and log q | Same IDs, duplicates preserved |
+| TK-KL | Sampler's top K IDs and original log q | Same IDs, plus an aggregated tail |
+| Binary KL | Realized action log q | Realized action log p |
+| Full KL | Full conditional log q in vocabulary order | Full conditional log p |
 
-K is the head size; M is the auxiliary sample count. Sequence MC uses an
-independent cross estimator and requires M >= 2. Token MC allows M=1. Neither
+M is the auxiliary sample count; K is the head size. Token MC allows M=1.
+Sequence MC uses an independent cross estimator and requires M >= 2. Neither
 requires extra response rollouts or a critic. MC KL and its sequence U-statistic
 loss can be negative and are not clamped.
 
