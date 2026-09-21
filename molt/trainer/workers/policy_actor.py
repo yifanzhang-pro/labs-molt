@@ -127,22 +127,31 @@ class PolicyTrainer:
         self.vllm_engines = vllm_engines
         self.max_epochs = self.args.train.max_epochs
 
-        self.actor_loss_fn = PolicyLoss(
-            clip_eps_low=self.args.actor.eps_clip_low_high[0],
-            clip_eps_high=self.args.actor.eps_clip_low_high[1],
-            dual_clip=self.args.actor.dual_clip,
-            loss_mode=self.args.actor.loss_mode,
-            is_correction_level=self.args.algo.advantage.is_correction_level,
-            is_correction_mode=self.args.algo.advantage.is_correction_mode,
-            is_correction_threshold=(
-                self.args.algo.advantage.is_correction_threshold
-                if self.args.algo.advantage.is_correction_level != "off"
-                else None
-            ),
-            loss_agg_mode=self.args.actor.loss_agg_mode,
-            is_correction_gating=self.args.algo.advantage.is_correction_gating,
-        )
+        if self.args.actor.loss_mode == "klpo":
+            from klpo.molt import KLPOLoss
 
+            self.actor_loss_fn = KLPOLoss(
+                beta=self.args.actor.klpo_beta,
+                route=self.args.actor.klpo_route,
+                kl_estimator=self.args.actor.klpo_kl_estimator,
+                tail_floor=self.args.actor.klpo_tail_floor,
+            )
+        else:
+            self.actor_loss_fn = PolicyLoss(
+                clip_eps_low=self.args.actor.eps_clip_low_high[0],
+                clip_eps_high=self.args.actor.eps_clip_low_high[1],
+                dual_clip=self.args.actor.dual_clip,
+                loss_mode=self.args.actor.loss_mode,
+                is_correction_level=self.args.algo.advantage.is_correction_level,
+                is_correction_mode=self.args.algo.advantage.is_correction_mode,
+                is_correction_threshold=(
+                    self.args.algo.advantage.is_correction_threshold
+                    if self.args.algo.advantage.is_correction_level != "off"
+                    else None
+                ),
+                loss_agg_mode=self.args.actor.loss_agg_mode,
+                is_correction_gating=self.args.algo.advantage.is_correction_gating,
+            )
         # Add the MoE router load-balancing aux loss only when its coefficient is set.
         self.aux_loss = self.args.actor.aux_loss_coef > 1e-8
 
@@ -444,6 +453,15 @@ class PolicyTrainer:
         # ranks share the sample); the CP gradient compensation for FSDP's extra
         # dp_cp averaging is applied in FsdpStrategy.backward (loss *= cp_size).
         loss_data_parallel_size = self.strategy.dp_size
+        klpo = self.args.actor.loss_mode == "klpo"
+        kl_forward = {}
+        if klpo:
+            estimator = self.args.actor.klpo_kl_estimator
+            if estimator != "binary" and experience.kl_log_probs is None:
+                raise ValueError("KLPO requires generation-time conditional probability records")
+            if estimator in {"tk", "mc"} and experience.kl_token_ids is None:
+                raise ValueError("KLPO TK/MC requires stored sampler token IDs")
+            kl_forward = {"kl_token_ids": experience.kl_token_ids, "return_full_log_probs": estimator == "full"}
         model_output = self.actor(
             sequences,
             action_mask,
@@ -455,6 +473,7 @@ class PolicyTrainer:
             # R3: replay the rollout's expert selection (None when routing replay off).
             routed_experts=experience.routed_experts,
             **multimodal_inputs,
+            **kl_forward,
         )
         action_log_probs = model_output["action_log_probs"]
         if old_action_log_probs is None:
@@ -490,6 +509,16 @@ class PolicyTrainer:
         # Stage 3: compute policy loss and metric-only policy diagnostics.
         # reported_actor_loss is a plain per-token mean for logging, decoupled
         # from the global token-mean used for the gradient (actor_loss).
+        kl_loss_args = {}
+        if klpo:
+            kl_loss_args = {
+                "rewards": experience.rewards,
+                "kl_log_probs": model_output.get("kl_log_probs"),
+                "behavior_kl_log_probs": (
+                    experience.kl_log_probs.transpose(1, 2) if experience.kl_log_probs is not None else None
+                ),
+                "full_vocabulary": estimator in {"tk", "full"} and model_output.get("kl_full_vocabulary", False),
+            }
         actor_loss, reported_actor_loss, clip_ratio, policy_kl, vllm_kl, is_filter_ratio = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,
@@ -499,7 +528,9 @@ class PolicyTrainer:
             dp_size=loss_data_parallel_size,
             batch_num_tokens=batch_num_tokens,
             global_batch_size=batch_num_seqs,
-            prompt_token_counts=prompt_token_counts,
+            # KLPOLoss aggregates per sequence and takes trajectory records instead.
+            **({} if klpo else {"prompt_token_counts": prompt_token_counts}),
+            **kl_loss_args,
         )
         experience.info["policy_clip_ratio"] = clip_ratio.detach()
         experience.info["policy_kl"] = policy_kl.detach()
@@ -597,7 +628,7 @@ class PolicyTrainer:
 
         # Stage 6: collect weighted metrics from this microbatch.
         metrics = {"policy_loss": reported_actor_loss.detach()}
-        weights = {"policy_loss": "token"}
+        weights = {"policy_loss": "sample" if klpo else "token"}
         if entropy_loss is not None:
             metrics["entropy_loss"] = entropy_loss.detach()
             weights["entropy_loss"] = "token"

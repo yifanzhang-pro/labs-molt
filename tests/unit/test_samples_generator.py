@@ -541,3 +541,22 @@ def test_without_partial_rollout_the_pool_holds_one_batch_and_drains(monkeypatch
     assert [sample.group_ids[0] for sample in samples] == ["p0", "p1", "p2"]
     assert prompts_dispatched == 3  # capacity 5, but only the batch's 3 prompts go out
     assert generator._inflight_rollouts == []  # pool drained: the refit sees no in-flight rollout
+
+
+def test_klpo_drains_each_batch_before_weight_update(monkeypatch):
+    generator = object.__new__(SamplesGenerator)
+    generator.args = SimpleNamespace(
+        actor=SimpleNamespace(loss_mode="klpo", num_nodes=1, num_gpus_per_node=1),
+        fsdp=SimpleNamespace(cp_size=1, tp_size=1),
+        rollout=SimpleNamespace(batch_size=3, n_samples_per_prompt=1, vllm_generate_batch_size=3),
+        algo=SimpleNamespace(dynamic_filtering_enable=False),
+        ckpt=SimpleNamespace(warm_resume_rollouts=False),
+    )
+    generator.prompts_dataloader = _prompt_loader(8)
+    _wire_fake_vllm(generator, monkeypatch, _sample)
+    for expected in (["p0", "p1", "p2"], ["p3", "p4", "p5"], ["p6", "p7"]):
+        samples, _, dispatched, _ = generator.generate_samples()
+        assert [s.group_ids[0] for s in samples] == expected
+        assert dispatched == len(expected)
+        assert not generator._inflight_rollouts
+        assert not generator._finished_samples

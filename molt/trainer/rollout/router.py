@@ -265,7 +265,10 @@ class RouterGenerateClient:
         body = {"token_ids": list(prompt_token_ids), "sampling_params": _inference_sampling_params(sampling_params)}
         if features is not None:
             body["features"] = features
-        out = await self._post("/inference/v1/generate", body, session_id)
+        kl_config = (getattr(sampling_params, "extra_args", None) or {}).get("molt_kl")
+        if kl_config:
+            body["kl"] = kl_config
+        out = await self._post("/molt/v1/generate" if kl_config else "/inference/v1/generate", body, session_id)
         c = out["choices"][0]
         ids = list(c.get("token_ids") or [])
         # logprobs=1 -> choice.logprobs.content[i] = {"token": "token_id:<id>", "logprob": ...}; a
@@ -278,6 +281,14 @@ class RouterGenerateClient:
         if any("logprob" not in item for item in content):
             raise RuntimeError("/inference/v1/generate returned a logprobs.content entry without a logprob field.")
         logprobs = [{t: SimpleNamespace(logprob=float(item["logprob"]))} for t, item in zip(ids, content)]
+        kl_records = {}
+        if kl_config and kl_config["estimator"] != "binary" and ids:
+            if "kl_records" not in c:
+                raise RuntimeError("KL capture endpoint returned no conditional records")
+            with np.load(io.BytesIO(base64.b64decode(c["kl_records"])), allow_pickle=False) as arrays:
+                kl_records = {name: arrays[name] for name in arrays.files}
+            if len(kl_records["kl_log_probs"]) != len(ids):
+                raise RuntimeError("Conditional KL records do not match generated tokens")
         fr = c.get("finish_reason")
         finish_reason = fr.get("type") if isinstance(fr, dict) else (fr or "stop")
         # routed_experts is the UNIFIED full-sequence [tokens,layer,topk] npy (prompt+gen); absorb_routing
@@ -291,6 +302,7 @@ class RouterGenerateClient:
             text="",  # /inference/v1/generate is token-only; the runner decodes text from token_ids
             finish_reason=finish_reason,
             logprobs=logprobs,
+            **kl_records,
             routed_experts=routed_experts,
         )
         # off_policy_len=0: the HTTP transport can't observe a mid-request weight-swap boundary and
@@ -376,9 +388,19 @@ class AgentRunnerActor:
         results = []
         for r in await asyncio.gather(*tasks, return_exceptions=True):  # a failed rollout must not sink the group
             if isinstance(r, BaseException):
+                if (getattr(sampling_params, "extra_args", None) or {}).get("molt_kl"):
+                    raise RuntimeError("KLPO rollout/capture failed; refusing to train incomplete records") from r
                 print(f"[runner] dropping failed rollout in group {group_id}: {r!r}", flush=True)
                 results.append((None, "runner_error"))
                 continue
+            if (
+                (getattr(sampling_params, "extra_args", None) or {}).get("molt_kl")
+                and isinstance(r, list)
+                and len(r) != 1
+            ):
+                raise ValueError(
+                    "KLPO requires one complete trajectory per response; context-compacted segments are unsupported"
+                )
             rollout_id = uuid4().hex
             for traj in r if isinstance(r, list) else [r]:
                 traj.group_id, traj.rollout_id = group_id, rollout_id

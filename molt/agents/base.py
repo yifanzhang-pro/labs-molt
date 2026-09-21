@@ -138,6 +138,9 @@ class Trajectory:
     # denominator (slime's mask_offpolicy_in_partial_rollout). 0 when on-policy.
     off_policy_action_lens: list = field(default_factory=list)
     rollout_log_probs: list | None = None
+    # Generation-time conditional records, aligned to observation_tokens; None on context positions.
+    kl_token_ids: list | None = None
+    kl_log_probs: list | None = None
     # R3 rollout routing replay: per-token MoE expert selection captured from the rollout
     # engine, aligned 1:1 with `observation_tokens` by absolute position (filled by
     # absorb_routing). Each entry is a ``[num_moe_layers, topk]`` int16 row, or None where
@@ -154,8 +157,24 @@ class Trajectory:
     group_id: str | None = None  # one per prompt group (N rollouts); GRPO baseline averaging
     rollout_id: str | None = None  # one per rollout; multi-turn step-samples dedup
 
-    def append_action(self, action_tokens, action_logprobs=None, off_policy_len=0):
+    def append_action(
+        self, action_tokens, action_logprobs=None, off_policy_len=0, kl_token_ids=None, kl_log_probs=None
+    ):
         start = len(self.observation_tokens)
+        if kl_log_probs is not None:
+            if len(kl_log_probs) != len(action_tokens):
+                raise ValueError("KL records must align with generated tokens")
+            if self.kl_log_probs is None:
+                self.kl_log_probs = [None] * start
+            self.kl_log_probs.extend(kl_log_probs)
+            if kl_token_ids is not None:
+                if len(kl_token_ids) != len(action_tokens):
+                    raise ValueError("KL token IDs must align with generated tokens")
+                if self.kl_token_ids is None:
+                    self.kl_token_ids = [None] * start
+                self.kl_token_ids.extend(kl_token_ids)
+        elif self.kl_log_probs is not None:
+            raise ValueError("Missing KL records on a subsequent action turn")
         self.observation_tokens.extend(action_tokens)
         self.action_ranges.append((start, len(self.observation_tokens)))
         self.off_policy_action_lens.append(int(off_policy_len))
@@ -168,6 +187,10 @@ class Trajectory:
     def append_feedback(self, action_text: str, feedback_text: str, feedback_tokens):
         self.observation_text = self.observation_text + action_text + feedback_text
         self.observation_tokens.extend(feedback_tokens)
+        if self.kl_log_probs is not None:
+            self.kl_log_probs.extend([None] * len(feedback_tokens))
+        if self.kl_token_ids is not None:
+            self.kl_token_ids.extend([None] * len(feedback_tokens))
         if self.rollout_log_probs is not None:
             self.rollout_log_probs.extend([0.0] * len(feedback_tokens))
         if self.routed_experts is not None:
@@ -418,7 +441,13 @@ class StepEnvRunner(Runner):
                 action_logprobs = None
                 if trajectory.rollout_log_probs is not None:
                     action_logprobs = _extract_generation_logprobs(action_tokens, generation.logprobs)
-                trajectory.append_action(action_tokens, action_logprobs, off_policy_len=off_policy_len)
+                trajectory.append_action(
+                    action_tokens,
+                    action_logprobs,
+                    off_policy_len=off_policy_len,
+                    kl_token_ids=getattr(generation, "kl_token_ids", None),
+                    kl_log_probs=getattr(generation, "kl_log_probs", None),
+                )
                 trajectory.absorb_routing(request_output)  # fills routing by absolute position (R3)
 
                 feedback_tokens = _tokenize_feedback(
@@ -429,7 +458,11 @@ class StepEnvRunner(Runner):
                 trajectory.append_feedback(action_text, result.observation, feedback_tokens)
 
                 if result.sampling_params is not None:
+                    kl_config = (getattr(sampling_params, "extra_args", None) or {}).get("molt_kl")
                     sampling_params = deepcopy(result.sampling_params)
+                    if kl_config:
+                        sampling_params.extra_args = {**(sampling_params.extra_args or {}), "molt_kl": kl_config}
+                        sampling_params.logprobs = 1
                     per_turn_cap = sampling_params.max_tokens
 
                 if result.terminated or result.truncated:

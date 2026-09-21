@@ -92,7 +92,12 @@ def train(args):
             args.vllm.enforce_eager,
             max_len,
             args.vllm.gpu_memory_utilization,
-            "processed_logprobs" if args.algo.advantage.is_correction_level != "off" else None,
+            (
+                "processed_logprobs"
+                if args.algo.advantage.is_correction_level != "off" or args.actor.loss_mode == "klpo"
+                else None
+            ),
+            klpo_enabled=args.actor.loss_mode == "klpo",
             max_images_per_prompt=getattr(args.data, "max_images_per_prompt", 0),
             mm_encoder_attn_backend=args.vllm.mm_encoder_attn_backend,
             gdn_prefill_backend=args.vllm.gdn_prefill_backend,
@@ -571,7 +576,7 @@ if __name__ == "__main__":
         "--actor.loss_mode",
         type=str,
         default="ppo",
-        choices=["ppo", "cispo", "gspo"],
+        choices=["ppo", "cispo", "gspo", "klpo"],
         help="Policy-gradient surrogate: ppo (clipped min(surr1,surr2), optionally --actor.dual_clip) or "
         "cispo (https://arxiv.org/abs/2506.13585 — clips only the upper side of the IS ratio, "
         "stop-gradient through that weight, gradient flows through log-probs only; pass "
@@ -581,6 +586,14 @@ if __name__ == "__main__":
         "so a single outlier token cannot clip the whole update; aggregated with molt's global "
         "token-mean denominator, not the paper's per-sequence 1/|y|; --actor.dual_clip is unused).",
     )
+    parser.add_argument("--actor.klpo_route", choices=["sequence", "token"], default="sequence")
+    parser.add_argument("--actor.klpo_kl_estimator", choices=["binary", "tk", "mc", "full"], default="tk")
+    parser.add_argument("--actor.klpo_beta", type=float, default=0.1)
+    parser.add_argument("--actor.klpo_top_k", type=int, default=128, help="TK-KL head size K (tail is aggregated)")
+    parser.add_argument(
+        "--actor.klpo_mc_samples", type=int, default=128, help="Independent auxiliary draws M per prefix"
+    )
+    parser.add_argument("--actor.klpo_tail_floor", type=float, default=1e-6)
     parser.add_argument(
         "--actor.entropy_coef",
         type=float,
@@ -998,13 +1011,61 @@ if __name__ == "__main__":
         )
         args.train.partial_rollout_enable = True
 
+    # KLPO consumes raw terminal rewards and complete, single-update trajectories.
+    if args.actor.loss_mode == "klpo":
+        import math
+
+        if not math.isfinite(args.actor.klpo_beta) or args.actor.klpo_beta <= 0:
+            raise ValueError("KLPO beta must be positive and finite")
+        if not 0 < args.actor.klpo_tail_floor < 1:
+            raise ValueError("KLPO tail_floor must be in (0, 1)")
+        if args.actor.klpo_top_k < 1 or args.actor.klpo_mc_samples < 1:
+            raise ValueError("KLPO K and M must be positive")
+        if (
+            args.actor.klpo_route == "sequence"
+            and args.actor.klpo_kl_estimator == "mc"
+            and args.actor.klpo_mc_samples < 2
+        ):
+            raise ValueError("Sequence MC-KL needs M >= 2 independent draws for its cross estimator")
+        if (
+            args.algo.advantage.estimator != "reinforce"
+            or not args.algo.advantage.no_whiten
+            or args.algo.advantage.is_correction_level != "off"
+            or args.algo.kl.init_coef != 0
+            or args.algo.dynamic_filtering_enable
+            or args.actor.dual_clip is not None
+            or args.actor.entropy_coef
+            or args.actor.aux_loss_coef
+        ):
+            raise ValueError(
+                "KLPO needs reinforce/no_whiten, IS off, zero reference KL/entropy/aux loss, no filtering/clipping"
+            )
+        if (
+            not args.train.force_on_policy
+            or not args.train.force_sync_mode
+            or args.train.max_epochs != 1
+            or args.train.async_queue_size != 1
+            or args.train.partial_rollout_enable
+            or args.rollout.vllm_generate_batch_size != args.rollout.batch_size
+        ):
+            raise ValueError(
+                "KLPO needs one synchronous optimizer step per rollout batch: force_on_policy, "
+                "force_sync_mode, max_epochs=1, async_queue_size=1, generate_batch_size=batch_size, no partial rollout"
+            )
+        if args.rollout.top_p != 1 or not math.isfinite(args.rollout.temperature) or args.rollout.temperature <= 0:
+            raise ValueError("KLPO requires full-support sampling: positive temperature and top_p=1")
+        if args.train.routing_replay or args.vllm.mtp_num_speculative_tokens:
+            raise ValueError(
+                "KLPO probability capture currently requires ordinary decoding without routing replay/MTP"
+            )
+
     # --- Algorithm checks ---
     # Group-relative estimators need >1 sample per prompt to form a baseline during training;
     # eval-only never trains, so skip that gate (eval uses --eval.n_samples_per_prompt).
     if not args.eval.eval_only and args.algo.advantage.estimator in ["rloo", "reinforce_baseline", "grpo", "dr_grpo"]:
-        assert args.rollout.n_samples_per_prompt > 1, (
-            f"{args.algo.advantage.estimator} requires n_samples_per_prompt > 1"
-        )
+        assert (
+            args.rollout.n_samples_per_prompt > 1
+        ), f"{args.algo.advantage.estimator} requires n_samples_per_prompt > 1"
 
     if args.algo.kl.use_loss and args.algo.kl.estimator not in ("k2", "k3"):
         print(f"Recommend setting {args.algo.kl.estimator} to 'k2' or 'k3' when using KL as a loss")
@@ -1012,13 +1073,13 @@ if __name__ == "__main__":
         print(f"Recommend setting {args.algo.kl.estimator} to 'k1' when not using KL as a loss.")
 
     if args.algo.dynamic_filtering_enable:
-        assert args.algo.dynamic_filtering_range[0] < args.algo.dynamic_filtering_range[1], (
-            "dynamic_filtering_range[0] must be less than dynamic_filtering_range[1]"
-        )
+        assert (
+            args.algo.dynamic_filtering_range[0] < args.algo.dynamic_filtering_range[1]
+        ), "dynamic_filtering_range[0] must be less than dynamic_filtering_range[1]"
         assert args.train.agent_path, "--train.agent_path must be specified when using dynamic filtering"
-        assert args.rollout.n_samples_per_prompt > 1, (
-            "n_samples_per_prompt must be greater than 1 when using dynamic filtering"
-        )
+        assert (
+            args.rollout.n_samples_per_prompt > 1
+        ), "n_samples_per_prompt must be greater than 1 when using dynamic filtering"
 
     if args.algo.advantage.is_correction_level == "off":
         # The HTTP router path can't observe a mid-request weight swap, so off_policy_len is always 0
@@ -1035,10 +1096,11 @@ if __name__ == "__main__":
                 "AND --train.force_sync_mode, no --train.partial_rollout_enable). Note: async_queue_size 1 "
                 "alone frees the rollout slot before the refit, so the next batch is still 1-step stale."
             )
-        print(
-            "[Warning] Rollout samples may be off-policy. Set "
-            "--algo.advantage.is_correction_level (token|seq|geo) to correct rollout logprobs during training."
-        )
+        if args.actor.loss_mode != "klpo":
+            print(
+                "[Warning] Rollout samples may be off-policy. Set "
+                "--algo.advantage.is_correction_level (token|seq|geo) to correct rollout logprobs during training."
+            )
     elif args.train.partial_rollout_enable:
         # IS is on, so the off-policy tokens are corrected; note only that slime-style MASKING is not.
         print(

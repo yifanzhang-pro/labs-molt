@@ -563,6 +563,13 @@ class BaseModel(nn.Module):
             # [B, seqlen] coordinates via the sharder layout (narrow for round_robin,
             # reshape for THD input_row_shape). The trailing slice drops the
             # cp-multiple pad the forward added.
+            layout = getattr(self._cp_sharder, "shard_layout", None)
+            positions = getattr(layout, "input_token_stream_positions", None)
+            if t.ndim > 2 and positions is not None:
+                full = self._cp_sharder.gather_token_tensor(t, seq_dim=1, trim=False)
+                positions = positions.to(full.device).reshape(*positions.shape, *([1] * (t.ndim - 2)))
+                indices = positions.clamp_min(0).expand(*positions.shape[:2], *full.shape[2:])
+                return full.gather(1, indices).masked_fill(positions < 0, 0)[:, :seqlen]
             return self._cp_sharder.gather_token_tensor(t, seq_dim=1, trim=True, fill=0.0)[:, :seqlen]
         if self.packing_samples:
             # cp1 packing: scatter the packed [1, total] rows back to padded [B, seqlen].

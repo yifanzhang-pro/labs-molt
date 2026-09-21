@@ -172,6 +172,7 @@ class SamplesGenerator:
         if getattr(self, "_eval_dataloader_iter", None) is None:
             self._eval_dataloader_iter = iter(self.eval_dataloader)
 
+        generate_kwargs["collect_kl"] = False
         all_experiences: List[Experience] = []
         try:
             while True:
@@ -464,14 +465,26 @@ class SamplesGenerator:
         as before. Per-rollout (not per-group) dispatch: a runner's event loop is shared by all its
         in-flight rollouts (grading, image processing and blocking tool calls run in-process), so
         a group's N rollouts land on N runners instead of one."""
+        collect_kl = getattr(getattr(self.args, "actor", None), "loss_mode", None) == "klpo" and generate_kwargs.get(
+            "collect_kl", True
+        )
+        kl_config = None
+        if collect_kl:
+            kl_config = {
+                "estimator": self.args.actor.klpo_kl_estimator,
+                "top_k": self.args.actor.klpo_top_k,
+                "mc_samples": self.args.actor.klpo_mc_samples,
+                "temperature": generate_kwargs.get("temperature", 1.0),
+            }
         sampling_params = SamplingParams(
             temperature=generate_kwargs.get("temperature", 1.0),
             top_p=generate_kwargs.get("top_p", 1.0),
             top_k=generate_kwargs.get("top_k", -1),
             max_tokens=generate_kwargs.get("max_new_tokens"),  # None = dynamic per-prompt
-            min_tokens=generate_kwargs.get("min_new_tokens", 1),
+            min_tokens=0 if collect_kl else generate_kwargs.get("min_new_tokens", 1),
             skip_special_tokens=generate_kwargs.get("skip_special_tokens", False),
-            logprobs=1 if self.args.algo.advantage.is_correction_level != "off" else None,
+            logprobs=1 if collect_kl or self.args.algo.advantage.is_correction_level != "off" else None,
+            extra_args={"molt_kl": kl_config} if collect_kl else None,
         )
         truncate_length = generate_kwargs.get("max_len", 2048)
         n_samples = generate_kwargs.get("n_samples_per_prompt", self.args.rollout.n_samples_per_prompt)
@@ -614,7 +627,23 @@ class SamplesGenerator:
                 arr = np.stack(rows).astype(np.int16)[:truncate_length]  # (T, L, K), aligned with sequences
                 routed_experts = torch.from_numpy(arr).permute(1, 2, 0).contiguous().unsqueeze(0)  # (1, L, K, T)
 
+        kl_records = {}
+        for name, dtype in (("kl_token_ids", torch.long), ("kl_log_probs", torch.float32)):
+            rows = getattr(response, name, None)
+            if rows is not None:
+                if len(rows) != len(trajectory_tokens):
+                    raise ValueError(f"{name} must align with the complete trajectory")
+                width = len(next(row for row in rows if row is not None))
+                dense = torch.zeros((len(trajectory_tokens), width), dtype=dtype)
+                for i, row in enumerate(rows):
+                    if row is not None:
+                        dense[i] = torch.as_tensor(row, dtype=dtype)
+                    elif action_token_mask[i]:
+                        raise ValueError(f"Missing {name} on an action token")
+                kl_records[name] = dense[step_slice].T.contiguous().unsqueeze(0)
+
         experience = Experience(
+            **kl_records,
             sequences=sequences.unsqueeze(0),
             attention_mask=attention_mask.unsqueeze(0),
             action_mask=action_mask.unsqueeze(0),

@@ -371,7 +371,13 @@ async def _run_turn(state: ChatServerState, session: _Session, body: dict) -> tu
     traj.truncated = traj.truncated or finish_reason == "length"
     # off_policy_len: leading tokens generated under stale weights when a broadcast landed
     # mid-request (per-token IS still corrects them); the transport reports it, same as the step runner.
-    traj.append_action(action_ids, action_logprobs, off_policy_len=off_policy_len)
+    traj.append_action(
+        action_ids,
+        action_logprobs,
+        off_policy_len=off_policy_len,
+        kl_token_ids=getattr(generation, "kl_token_ids", None),
+        kl_log_probs=getattr(generation, "kl_log_probs", None),
+    )
     # R3: absorb this turn's prefill+gen routing by absolute position (first-writer-wins). The full
     # prefill covers the prior action's trailing token too, so the turn-boundary backfills naturally.
     traj.absorb_routing(request_output)

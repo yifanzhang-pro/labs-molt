@@ -69,6 +69,12 @@ rollout to training. Anything you can compute in Python is a valid reward,
 including LLM-as-judge calls back through the same vLLM engines that drive
 rollout.
 
+## KLPO fork
+
+This branch adds native sampling, replay, and trainer scoring for both KLPO
+regression routes with Binary, TK-KL, MC-KL, and Full KL. See the
+[KLPO interface and launch guide](docs/klpo.md).
+
 ## ✨ Why Molt
 
 | | What you get | Why it matters for research |

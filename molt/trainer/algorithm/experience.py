@@ -88,6 +88,9 @@ class Experience:
     action_log_probs: torch.Tensor = tensor_field("step", default=None)  # (B, T-1) log pi_theta(a|s)
     base_action_log_probs: torch.Tensor = tensor_field("step", default=None)  # (B, T-1) log pi_ref(a|s)
     rollout_log_probs: torch.Tensor = tensor_field("step", default=None)  # (B, T-1) log pi_old(a|s)
+    # Conditional KL records are sequence-last so replay/padding preserve their auxiliary axis.
+    kl_token_ids: torch.Tensor = tensor_field("step", default=None)  # (B, K or M, T-1); None for full
+    kl_log_probs: torch.Tensor = tensor_field("step", default=None)  # (B, K/M/V, T-1), historical sampler
     # R3 rollout routing replay: the rollout router's top-k expert ids per token, one row
     # per MoE layer. Stored seq-LAST as (B, num_moe_layers, topk, T) so it rides the same
     # right-pad/concat/stack machinery as the (B, T) step tensors; the actor forward
@@ -136,7 +139,16 @@ class Experience:
     # pixel_values, token ids, rollout routing) but the controller's advantage/length-balance logic
     # does not, so they never reach the controller. Rule: keep only what the controller reads light;
     # offload the rest (a byte-embedded `images` dataset column can be large).
-    HEAVY_FIELDS = ("sequences", "attention_mask", "rollout_log_probs", "routed_experts", "mm_train_inputs", "images")
+    HEAVY_FIELDS = (
+        "sequences",
+        "attention_mask",
+        "rollout_log_probs",
+        "kl_token_ids",
+        "kl_log_probs",
+        "routed_experts",
+        "mm_train_inputs",
+        "images",
+    )
 
     def offload(self) -> "Experience":
         """Move this sample's heavy fields into the object store (on the producing runner) and keep

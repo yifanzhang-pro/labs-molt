@@ -1,0 +1,28 @@
+name: KLPO native CPU tests
+on:
+  push:
+    branches: [feat/klpo-all-kl]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install numpy transformers ray torchdata tqdm aiohttp pillow uvicorn fastapi pytest packaging pylatexenc jsonlines
+      - run: python -m compileall -q molt examples/python tests
+      - name: CPU regression suite with existing vLLM test doubles
+        run: |
+          python - <<'PY'
+          import sys
+          import ray
+          sys.path.insert(0, 'tests/unit')
+          import test_samples_generator
+          import test_vllm_engine
+          sys.modules['vllm'].SamplingParams = test_samples_generator.SamplingParams
+          import pytest
+          raise SystemExit(pytest.main(['-q']))
+          PY

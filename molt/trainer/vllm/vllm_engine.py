@@ -165,6 +165,8 @@ class RolloutRayActor:
         except TypeError:
             await _api.init_app_state(self.llm, app.state, args)
 
+        app.post("/molt/v1/generate")(self.generate_kl)
+
         config = uvicorn.Config(app, host=host, port=port, log_level="warning")
         server = uvicorn.Server(config)
         # vLLM's error handlers (e.g. the disagg /inference/v1/generate path) reach for
@@ -179,6 +181,121 @@ class RolloutRayActor:
         self._server_url = f"http://{ray.util.get_node_ip_address()}:{actual_port}"
         print(f"vLLM OpenAI server up at {self._server_url}", flush=True)
         return self._server_url
+
+    async def generate_kl(self, body: dict) -> dict:
+        """Capture KL conditionals from the same processed logits that generated each action.
+
+        TK records keep the sampler head; MC draws use a separate CPU RNG and keep duplicates.
+        Full/MC request the vocabulary internally, reducing MC records before HTTP transport.
+        """
+        import base64
+        import io
+        from uuid import uuid4
+
+        import numpy as np
+        from vllm.sampling_params import RequestOutputKind, SamplingParams
+
+        if self.kwargs.get("logprobs_mode") != "processed_logprobs":
+            raise RuntimeError("Native KL capture requires an engine configured with processed_logprobs")
+        config = body["kl"]
+        estimator = config["estimator"]
+        if estimator not in {"binary", "tk", "mc", "full"}:
+            raise ValueError("Unknown KL estimator")
+        params = dict(body["sampling_params"])
+        if (
+            params["temperature"] != config["temperature"]
+            or params["temperature"] <= 0
+            or params.get("top_p", 1) != 1
+            or params.get("top_k", -1) not in (-1, 0)
+            or params.get("min_p", 0)
+            or params.get("min_tokens", 0)
+            or params.get("repetition_penalty", 1) != 1
+            or params.get("frequency_penalty", 0)
+            or params.get("presence_penalty", 0)
+        ):
+            raise ValueError("KLPO sampling must match trainer temperature with full support and no penalties")
+        vocab_size = self.llm.model_config.get_vocab_size()
+        k, m = min(int(config["top_k"]), vocab_size), int(config["mc_samples"])
+        if k < 1 or m < 1:
+            raise ValueError("KL K and M must be positive")
+        params["logprobs"] = {"binary": 0, "tk": k, "mc": -1, "full": -1}[estimator]
+        params["output_kind"] = RequestOutputKind.DELTA
+        params["detokenize"] = False
+        prompt = {"prompt_token_ids": body["token_ids"]}
+        if body.get("features") is not None:
+            from vllm.entrypoints.serve.disagg.mm_serde import decode_mm_kwargs_item
+            from vllm.inputs import mm_input
+            from vllm.multimodal.inputs import MultiModalKwargsItems, PlaceholderRange
+
+            features = body["features"]
+            data = features.get("kwargs_data") or {}
+            kwargs = {
+                mod: [
+                    decode_mm_kwargs_item(item) if item is not None else None
+                    for item in data.get(mod, [None] * len(hashes))
+                ]
+                for mod, hashes in features["mm_hashes"].items()
+            }
+            prompt = mm_input(
+                prompt_token_ids=body["token_ids"],
+                mm_kwargs=MultiModalKwargsItems(kwargs),
+                mm_hashes=features["mm_hashes"],
+                mm_placeholders={
+                    mod: [PlaceholderRange(**r) for r in rows] for mod, rows in features["mm_placeholders"].items()
+                },
+            )
+        # Never seed from the rollout request: auxiliary draws must not share its random stream.
+        rng = np.random.default_rng()
+        tokens, action_logps, record_ids, record_logps = [], [], [], []
+        request_id = "molt-kl-" + uuid4().hex
+        finish_reason = "stop"
+        try:
+            async for result in self.llm.generate(prompt, SamplingParams(**params), request_id):
+                generation = result.outputs[0]
+                if generation.finish_reason:
+                    finish_reason = generation.finish_reason
+                if len(generation.token_ids) != len(generation.logprobs or []):
+                    raise RuntimeError("Sampler omitted KL logprobs")
+                for token, entries in zip(generation.token_ids, generation.logprobs or []):
+                    if token not in entries or not np.isfinite(entries[token].logprob):
+                        raise RuntimeError("Sampler omitted the realized action probability")
+                    tokens.append(int(token))
+                    action_logps.append(float(entries[token].logprob))
+                    if estimator == "binary":
+                        continue
+                    if estimator == "tk":
+                        head = sorted(entries, key=lambda v: (-entries[v].logprob, v))[:k]
+                        if len(head) != k:
+                            raise RuntimeError("Sampler did not return the requested TK head")
+                        values = [entries[v].logprob for v in head]
+                        record_ids.append(head)
+                    else:
+                        if len(entries) != vocab_size or set(entries) != set(range(vocab_size)):
+                            raise RuntimeError("Full/MC KL requires all sampler vocabulary probabilities")
+                        values = np.array([entries[v].logprob for v in range(vocab_size)], dtype=np.float64)
+                        probs = np.exp(values)
+                        if not np.isclose(probs.sum(), 1, atol=2e-5) or not np.isfinite(probs).all():
+                            raise RuntimeError("Sampler returned an invalid full conditional distribution")
+                        if estimator == "mc":
+                            draws = rng.choice(vocab_size, size=m, replace=True, p=probs / probs.sum())
+                            record_ids.append(draws)
+                            values = values[draws]
+                    record_logps.append(values)
+        finally:
+            await self.llm.abort(request_id)
+        choice = {
+            "token_ids": tokens,
+            "finish_reason": finish_reason,
+            "logprobs": {"content": [{"logprob": lp} for lp in action_logps]},
+        }
+        if record_logps:
+            arrays = {"kl_log_probs": np.asarray(record_logps, dtype=np.float32)}
+            if record_ids:
+                arrays["kl_token_ids"] = np.asarray(record_ids, dtype=np.int32)
+            buf = io.BytesIO()
+            np.savez(buf, **arrays)
+            choice["kl_records"] = base64.b64encode(buf.getvalue()).decode("ascii")
+        return {"choices": [choice]}
 
     def _configure_device_env(self, backend, bundle_indices, worker_num_gpus):
         if backend == "ray":
@@ -311,6 +428,7 @@ def create_vllm_engines(
     enable_return_routed_experts: bool = False,
     pipeline_parallel_size: int = 1,
     data_parallel_size: int = 1,
+    klpo_enabled: bool = False,
 ):
     """Spin up a set of vLLM Ray actors on a dedicated placement group.
 
@@ -345,9 +463,7 @@ def create_vllm_engines(
     distributed_executor_backend = distributed_executor_backend or (
         "uni"
         if tensor_parallel_size * pipeline_parallel_size * data_parallel_size == 1
-        else "mp"
-        if data_parallel_size > 1
-        else "ray"
+        else "mp" if data_parallel_size > 1 else "ray"
     )
     if distributed_executor_backend not in {"uni", "ray", "mp"}:
         raise ValueError(
@@ -514,6 +630,10 @@ def create_vllm_engines(
             # the OAI server may serve external top_logprobs>1; vLLM's default
             # (20) covers both. Capping at 1 would reject those requests.
             actor_kwargs["logprobs_mode"] = logprobs_mode
+
+        if klpo_enabled:
+            actor_kwargs["max_logprobs"] = -1
+            actor_kwargs["generation_config"] = "vllm"
 
         # MTP speculative decoding (rollout-side). method="mtp" is required: vLLM
         # then resolves the per-architecture MTP draft from the served target's

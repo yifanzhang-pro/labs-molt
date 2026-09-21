@@ -44,6 +44,8 @@ class Actor(BaseModel):
         cp_context_stack=None,
         return_entropy=False,
         routed_experts: Optional[torch.Tensor] = None,
+        kl_token_ids: Optional[torch.Tensor] = None,
+        return_full_log_probs: bool = False,
         **mm_inputs,
     ) -> _AttrDict:
         """Run the policy forward and return one named output dict.
@@ -56,6 +58,10 @@ class Actor(BaseModel):
                                 only when ``action_mask`` is given (RL / reference).
         - ``entropy``:          ``[B, S-1]`` — only when ``return_entropy`` (RL).
         - ``aux_loss``:         MoE load-balancing loss — only for NeMo custom MoE.
+        - ``kl_log_probs``:     [B, S-1, K/M/V] conditionals when KL records are requested.
+        - ``kl_full_vocabulary``: whether the requested conditionals cover the vocabulary.
+
+        ``kl_token_ids`` uses [B, K/M, S-1], the replay buffer's sequence-last format.
         """
         output, rolled_sequences, cp_forward, indices, batch, seqlen = self._forward_backbone(
             sequences, attention_mask, position_ids, cp_context_stack, mm_inputs, routed_experts=routed_experts
@@ -101,6 +107,40 @@ class Actor(BaseModel):
         log_probs = self._restore_full_sequence(
             log_probs, cp_forward=cp_forward, batch=batch, seqlen=seqlen, indices=indices
         )
+
+        if kl_token_ids is not None or return_full_log_probs:
+            # Gather the TP vocabulary; score only stored IDs before restoring the CP/packed axis.
+            conditional_logits = unshard_dtensor(logits)
+            if return_full_log_probs:
+                dtype = torch.float64 if conditional_logits.dtype == torch.float64 else torch.float32
+                conditional = torch.log_softmax(conditional_logits.to(dtype) / self.temperature, dim=-1)
+            else:
+                if kl_token_ids.shape[0] != batch or kl_token_ids.shape[2] != seqlen - 1:
+                    raise ValueError("kl_token_ids must have shape [B, K/M, S-1]")
+                ids = torch.nn.functional.pad(kl_token_ids.transpose(1, 2).long(), (0, 0, 0, 1))
+                width = ids.shape[-1]
+                if cp_forward:
+                    layout = getattr(self._cp_sharder, "shard_layout", None)
+                    positions = getattr(layout, "input_token_stream_positions", None)
+                    if positions is not None:
+                        # AutoModel's repositioned-row verb accepts scalar streams only.
+                        positions = positions.to(ids.device)
+                        valid = positions >= 0
+                        padded = ids.new_zeros((batch, layout.padded_seq_len, width))
+                        padded[valid.nonzero(as_tuple=True)[0], positions[valid]] = ids[valid]
+                        ids = padded
+                    ids = self._cp_sharder.shard_token_tensor(ids, seq_dim=1, fill=0)
+                elif self.packing_samples:
+                    ids = ids.reshape(-1, width).index_select(0, indices)
+                    pad = conditional_logits.numel() // conditional_logits.shape[-1] - ids.shape[0]
+                    ids = torch.nn.functional.pad(ids, (0, 0, 0, pad))
+                ids = ids.reshape(*conditional_logits.shape[:-1], width)
+                conditional = log_probs_from_logits(conditional_logits, ids, temperature=self.temperature)
+            conditional = self._restore_full_sequence(
+                conditional, cp_forward=cp_forward, batch=batch, seqlen=seqlen, indices=indices
+            )
+            output["kl_log_probs"] = conditional[:, :-1]
+            output["kl_full_vocabulary"] = return_full_log_probs or conditional.shape[-1] == logits.shape[-1]
 
         # Drop the final column: logits[t] predicts token[t+1], so the last
         # position has no target. log_probs / action_log_probs / entropy are all
