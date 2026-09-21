@@ -586,8 +586,8 @@ if __name__ == "__main__":
         "so a single outlier token cannot clip the whole update; aggregated with molt's global "
         "token-mean denominator, not the paper's per-sequence 1/|y|; --actor.dual_clip is unused).",
     )
-    parser.add_argument("--actor.klpo_route", choices=["sequence", "token"], default="sequence")
-    parser.add_argument("--actor.klpo_kl_estimator", choices=["binary", "tk", "mc", "full"], default="tk")
+    parser.add_argument("--actor.klpo_route", choices=["sequence", "token"], default="token")
+    parser.add_argument("--actor.klpo_kl_estimator", choices=["binary", "tk", "mc", "full"], default="mc")
     parser.add_argument("--actor.klpo_beta", type=float, default=0.1)
     parser.add_argument("--actor.klpo_top_k", type=int, default=128, help="TK-KL head size K (tail is aggregated)")
     parser.add_argument(

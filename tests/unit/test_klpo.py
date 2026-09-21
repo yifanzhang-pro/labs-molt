@@ -202,10 +202,6 @@ def test_native_cli_accepts_all_routes(monkeypatch, route, estimator):
         "agent.py",
         "--actor.loss_mode",
         "klpo",
-        "--actor.klpo_route",
-        route,
-        "--actor.klpo_kl_estimator",
-        estimator,
         "--actor.klpo_mc_samples",
         "2",
         "--algo.advantage.estimator",
@@ -220,9 +216,12 @@ def test_native_cli_accepts_all_routes(monkeypatch, route, estimator):
         "--train.async_queue_size",
         "1",
     ]
+    if (route, estimator) != ("token", "mc"):
+        flags += ["--actor.klpo_route", route, "--actor.klpo_kl_estimator", estimator]
     monkeypatch.setattr(sys, "argv", flags)
     exec(compile(ast.Module(body=main.body, type_ignores=[]), cli.__file__, "exec"), namespace)
     assert captured[0].actor.klpo_kl_estimator == estimator
+    assert captured[0].actor.klpo_route == route
 
 
 @pytest.mark.parametrize("layout_kind", ["round_robin", "thd", "reposition"])

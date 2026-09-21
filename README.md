@@ -72,7 +72,8 @@ rollout.
 ## KLPO fork
 
 This branch adds native sampling, replay, and trainer scoring for both KLPO
-regression routes with Binary, TK-KL, MC-KL, and Full KL. See the
+regression routes with Binary, TK-KL, MC-KL, and Full KL. KLPO defaults to
+token regression + MC-KL with M=128 auxiliary draws per prefix. See the
 [KLPO interface and launch guide](docs/klpo.md).
 
 ## ✨ Why Molt

@@ -6,13 +6,16 @@ KL (MC-KL), or Full KL. Install the [KLPO package](https://github.com/yifanzhang
 alongside Molt. The backend calls `klpo.molt.KLPOLoss`; the mathematical formulas
 have one implementation in KLPO.
 
+The default is **KLPO token regression + MC-KL**, with M=128 independent
+auxiliary draws per prefix, matching the paper's default route and estimator.
+
 ```bash
 python /path/to/KLPO/scripts/train_molt.py \
   --molt-path /path/to/labs-molt --model /path/to/model \
   --train-data /path/to/train --eval-data /path/to/eval \
-  --route sequence --kl-estimator tk --top-k 128
-# Other choices: --route token; --kl-estimator binary|full;
-# --kl-estimator mc --mc-samples 2
+  --route token --kl-estimator mc --mc-samples 128
+# Other choices: --route sequence; --kl-estimator binary|full;
+# --kl-estimator tk --top-k 128
 ```
 
 Native CLI flags are `--actor.loss_mode klpo`, `--actor.klpo_route`,
