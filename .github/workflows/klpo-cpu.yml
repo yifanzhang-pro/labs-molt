@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: python -m pip install numpy transformers ray torchdata tqdm aiohttp pillow uvicorn fastapi pytest packaging pylatexenc jsonlines
+      - run: python -m pip install numpy transformers datasets ray torchdata tqdm aiohttp pillow uvicorn fastapi pytest packaging pylatexenc jsonlines
       - run: python -m compileall -q molt examples/python tests
       - name: CPU regression suite with existing vLLM test doubles
         run: |
