@@ -6,16 +6,16 @@ This fork's `feat/klpo-all-kl` branch supports KLPO **token regression** and
 alongside Molt. The backend calls `klpo.molt.KLPOLoss`; the mathematical formulas
 have one implementation in KLPO.
 
-The default is **KLPO token regression + MC-KL**, with M=128 independent
+The default is **KLPO token regression + MC-KL**, with M=16 independent
 auxiliary draws per prefix, matching the paper's default route and estimator.
 
 ```bash
 python /path/to/KLPO/scripts/train_molt.py \
   --molt-path /path/to/labs-molt --model /path/to/model \
   --train-data /path/to/train --eval-data /path/to/eval \
-  --route token --kl-estimator mc --mc-samples 128
+  --route token --kl-estimator mc --mc-samples 16
 # Other choices: --route sequence; --kl-estimator binary|full;
-# --kl-estimator topk --top-k 128
+# --kl-estimator topk --top-k 16
 ```
 
 Native CLI flags are `--actor.loss_mode klpo`, `--actor.klpo_route`,

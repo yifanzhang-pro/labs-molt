@@ -589,9 +589,9 @@ if __name__ == "__main__":
     parser.add_argument("--actor.klpo_route", choices=["sequence", "token"], default="token")
     parser.add_argument("--actor.klpo_kl_estimator", choices=["binary", "topk", "mc", "full"], default="mc")
     parser.add_argument("--actor.klpo_beta", type=float, default=0.1)
-    parser.add_argument("--actor.klpo_top_k", type=int, default=128, help="TopK-KL head size K (tail is aggregated)")
+    parser.add_argument("--actor.klpo_top_k", type=int, default=16, help="TopK-KL head size K (tail is aggregated)")
     parser.add_argument(
-        "--actor.klpo_mc_samples", type=int, default=128, help="Independent auxiliary draws M per prefix"
+        "--actor.klpo_mc_samples", type=int, default=16, help="Independent auxiliary draws M per prefix"
     )
     parser.add_argument("--actor.klpo_tail_floor", type=float, default=1e-6)
     parser.add_argument(
