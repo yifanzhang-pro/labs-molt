@@ -24,5 +24,6 @@ jobs:
           import test_vllm_engine
           sys.modules['vllm'].SamplingParams = test_samples_generator.SamplingParams
           import pytest
-          raise SystemExit(pytest.main(['-q']))
+          # test_refit_lora_merge imports nemo_automodel, which this CPU job does not install.
+          raise SystemExit(pytest.main(['-q', '--ignore=tests/unit/test_refit_lora_merge.py']))
           PY
