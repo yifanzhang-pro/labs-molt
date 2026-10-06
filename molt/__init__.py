@@ -13,4 +13,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-KLPO_API_VERSION = 2
+KLPO_API_VERSION = 1

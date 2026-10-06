@@ -22,7 +22,7 @@ Native CLI flags are `--actor.loss_mode klpo`, `--actor.klpo_route`,
 `--actor.klpo_kl_estimator`, `--actor.klpo_beta`, `--actor.klpo_top_k`,
 `--actor.klpo_mc_samples`, and `--actor.klpo_tail_floor`. The launcher supplies the
 required synchronous single-update schedule and raw-reward configuration.
-`molt.KLPO_API_VERSION = 2` identifies this interface and its `topk` estimator name.
+`molt.KLPO_API_VERSION = 1` identifies this interface and its `topk` estimator name.
 
 | Estimator | Generation-time records | Trainer scoring |
 | --- | --- | --- |
