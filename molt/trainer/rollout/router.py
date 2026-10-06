@@ -109,6 +109,11 @@ class VllmRouterActor:
         raise RuntimeError(f"vLLM router did not come up on {self._host}:{self._port}")
 
 
+def _decode_kl_records(blob):
+    with np.load(io.BytesIO(base64.b64decode(blob)), allow_pickle=False) as arrays:
+        return {name: arrays[name] for name in arrays.files}
+
+
 def _decode_routed_experts(blob):
     """R3 routed experts -> ndarray [tokens, moe_layers, topk]. The disagg engine ships a base64 .npy
     (faithful); also accept nested JSON lists for forward-compat."""
@@ -285,8 +290,7 @@ class RouterGenerateClient:
         if kl_config and kl_config["estimator"] != "binary" and ids:
             if "kl_records" not in c:
                 raise RuntimeError("KL capture endpoint returned no conditional records")
-            with np.load(io.BytesIO(base64.b64decode(c["kl_records"])), allow_pickle=False) as arrays:
-                kl_records = {name: arrays[name] for name in arrays.files}
+            kl_records = await asyncio.to_thread(_decode_kl_records, c["kl_records"])
             if len(kl_records["kl_log_probs"]) != len(ids):
                 raise RuntimeError("Conditional KL records do not match generated tokens")
         fr = c.get("finish_reason")
