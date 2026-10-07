@@ -588,7 +588,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--actor.klpo_route", choices=["sequence", "token"], default="token")
     parser.add_argument("--actor.klpo_kl_estimator", choices=["binary", "topk", "mc", "full"], default="mc")
-    parser.add_argument("--actor.klpo_beta", type=float, default=0.1)
+    parser.add_argument("--actor.klpo_beta", type=float, default=1e-3)
     parser.add_argument("--actor.klpo_top_k", type=int, default=16, help="TopK-KL head size K (tail is aggregated)")
     parser.add_argument(
         "--actor.klpo_mc_samples", type=int, default=16, help="Independent auxiliary draws M per prefix"
@@ -1015,8 +1015,8 @@ if __name__ == "__main__":
     if args.actor.loss_mode == "klpo":
         import math
 
-        if not math.isfinite(args.actor.klpo_beta) or args.actor.klpo_beta <= 0:
-            raise ValueError("KLPO beta must be positive and finite")
+        if not math.isfinite(args.actor.klpo_beta) or args.actor.klpo_beta < 0:
+            raise ValueError("KLPO beta must be finite and nonnegative")
         if not 0 < args.actor.klpo_tail_floor < 1:
             raise ValueError("KLPO tail_floor must be in (0, 1)")
         if args.actor.klpo_top_k < 1 or args.actor.klpo_mc_samples < 1:
